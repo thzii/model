@@ -1,0 +1,92 @@
+# PLANORA-SF default configuration (mirrors planora_sf.config.PlanoraSFConfig()).
+# Provenance tags refer to PLANORA_SF_Method_Spec.md. U-xx values are scaffold
+# defaults (engineering placeholders), not paper values.
+
+selex_compat: true            # spec §8: reproduce official SelEx code behaviour
+base: selex                   # FX-A §8: selex (FourEx) | gcd (FourGCD)
+dataset: null
+
+backbone:
+  name: dinov1_vitb16         # FX-P §5.1 | dinov2_vitb14_reg | tiny (synthetic tests)
+  grad_from_block: 9          # FX-P §5.1: train blocks 9-11
+  train_final_norm: false     # SelEx ct.py:746-758
+  image_size: 224             # ct.py:738
+
+head:                         # SelEx DINOHead
+  hidden_dim: 2048
+  bottleneck_dim: 256
+  num_layers: 3
+
+latent:
+  dim: 65536                  # D, ct.py:741 (U-12)
+  fraction_of_half: true      # U-13
+  high_fraction_mode: one_minus   # U-11: d_h = (1 - f_h/T_h) * D/2 | ratio
+  renormalize_slices: false   # U-14
+
+fourier:
+  snr_target_db: 15.0         # FX-P §4
+  cutoff: null                # T: calibrate (fourier.snr) or use for_dataset() (FX-A Table 7)
+  cutoff_high: null           # null -> T_h = T_l (U-08)
+  blur_kernel_size: 5         # FX-P §5.1
+  blur_sigma: 1.1             # U-03
+  blur_anchor: false          # U-03
+  strict_inequality: true     # U-06
+  band_pass: false            # U-07
+  per_image_cutoffs: true     # U-02
+  low_cutoff_min: 1           # U-02: f_l in {1..T_l}
+  high_cutoff_min: 0          # U-02: f_h in {0..T_h-1}
+  filtered_view: x1           # U-01
+  extra_views: true           # U-01
+  snr_metric: box             # U-09
+
+selex:
+  lam: 0.35                   # SX-P §5.1
+  smoothing_alpha: 0.5        # SX-P §5.1; README values via for_dataset() (U-24)
+  tau_unsup: 1.0              # ct.py:668
+  tau_sup: 0.07               # ct.py:59
+  similarity: neg_euclidean   # D-06
+  use_loss: soft_ce           # D-01 | bce
+  target_mode: null           # null -> compat if selex_compat else paper (U-21)
+  balanced: true              # U-30
+  kmeans_max_iter: 10         # ct.py:540-543
+  kmeans_n_init: 1
+  reproduce_label_order_bug: false   # U-22 / D-08
+
+weights:                      # FX-P Table 5
+  low: 0.1
+  high: 0.1
+  cls: 0.1
+
+cls_head:                     # U-17 (unspecified in FourEx)
+  enabled: true
+  input: cls
+  loss: sigmoid_bce
+  num_classes: null           # null -> number of known classes
+
+optim:                        # SelEx code (U-23)
+  lr: 0.1
+  momentum: 0.9
+  weight_decay: 5.0e-5
+  epochs: 200
+  eta_min_factor: 1.0e-3
+  batch_size: 128
+
+eval:
+  clustering: bssk            # U-26: bssk | ss_kmeans
+  n_init: 10                  # k_means.py:123
+  max_iter: 10                # k_means.py:122
+  metric: v2
+
+data:                         # GCD split protocol (SX-P §5.1)
+  known_class_fraction: 0.5
+  labelled_fraction: 0.5
+  split_seed: 0               # SelEx subsample_instances: np.random.seed(0)
+  stratified: false           # SelEx samples globally over known-class images
+  use_ssb_splits: true        # CUB/Aircraft/Cars SSB class lists
+
+loop:
+  num_workers: 4
+  prototype_features: train_view0   # D-11 parity | test_transform
+  eval_every: 0               # 0 = evaluate only after the last epoch
+  max_steps_per_epoch: null   # dry runs only
+  crop_pct: 0.875             # ct.py:712

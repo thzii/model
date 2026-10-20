@@ -1,0 +1,10 @@
+# PLANORA-SF research scaffold. CPU is enough for the unit tests.
+torch>=2.1
+torchvision>=0.16
+Pillow>=9.0
+numpy>=1.24
+scipy>=1.10
+PyYAML>=6.0
+pytest>=7.4
+# Loading the real DINO backbones goes through torch.hub (network access or a
+# populated hub cache). CUB-200-2011 is fetched by planora_sf.cli.download_cub.
