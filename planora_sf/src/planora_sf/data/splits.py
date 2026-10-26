@@ -69,6 +69,12 @@ def cub_ssb_classes() -> tuple[list[int], list[int]]:
     return list(data["known_classes"]), unknown["Hard"] + unknown["Medium"] + unknown["Easy"]
 
 
+def cub_ssb_novel_tiers() -> dict[str, list[int]]:
+    """SSB novel CUB classes by difficulty tier (0-based original ids); map with ``GCDSplit.class_to_target``."""
+    unknown = json.loads(_SSB_FILE.read_text(encoding="utf-8"))["unknown_classes"]
+    return {tier: list(unknown[tier]) for tier in ("Hard", "Medium", "Easy")}
+
+
 def make_gcd_split(
     targets: Sequence[int],
     *,

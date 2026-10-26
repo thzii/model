@@ -76,6 +76,7 @@ eval:
   n_init: 10                  # k_means.py:123
   max_iter: 10                # k_means.py:122
   metric: v2
+  seed: 0                     # evaluation RNG seed (plan T1, A10)
 
 data:                         # GCD split protocol (SX-P §5.1)
   known_class_fraction: 0.5

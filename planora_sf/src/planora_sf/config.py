@@ -196,12 +196,15 @@ class EvalConfig:
     n_init: int = 10  # k_means.py:123
     max_iter: int = 10  # k_means.py:122
     metric: str = "v2"  # Train ACC Unlabelled_v2
+    seed: int = 0  # evaluation RNG seed (plan T1, A10); used by cli.evaluate
 
     def __post_init__(self) -> None:
         _check_choice("eval.clustering", self.clustering, {"bssk", "ss_kmeans"})
         _check_choice("eval.metric", self.metric, {"v1", "v2"})
         _check_positive("eval.n_init", self.n_init)
         _check_positive("eval.max_iter", self.max_iter)
+        if self.seed < 0:
+            raise ValueError(f"eval.seed must be >= 0, got {self.seed}")
 
 
 @dataclass

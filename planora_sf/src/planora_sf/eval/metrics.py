@@ -31,6 +31,14 @@ def cluster_acc(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(w[rows, cols].sum() / y_pred.size)
 
 
+def hungarian_mapping(y_true, y_pred) -> dict[int, int]:
+    """Class id -> cluster id of the single global one-to-one matching that v2 uses (spec §7 step 4)."""
+    y_true, y_pred = np.asarray(y_true, dtype=np.int64), np.asarray(y_pred, dtype=np.int64)
+    w = _contingency(y_true, y_pred)
+    rows, cols = linear_sum_assignment(w.max() - w)
+    return {int(c): int(r) for r, c in zip(rows, cols)}
+
+
 def split_cluster_acc_v1(y_true, y_pred, known_mask) -> AccuracyReport:
     """Separate Hungarian per subset; All is the subset-size-weighted mean (logged, not reported)."""
     y_true, y_pred = np.asarray(y_true, dtype=np.int64), np.asarray(y_pred, dtype=np.int64)
@@ -49,9 +57,8 @@ def split_cluster_acc_v2(y_true, y_pred, known_mask) -> AccuracyReport:
     y_true, y_pred = np.asarray(y_true, dtype=np.int64), np.asarray(y_pred, dtype=np.int64)
     known_mask = np.asarray(known_mask, dtype=bool)
     w = _contingency(y_true, y_pred)
-    rows, cols = linear_sum_assignment(w.max() - w)
-    class_to_cluster = {int(c): int(r) for r, c in zip(rows, cols)}
-    total = float(w[rows, cols].sum() / y_pred.size)
+    class_to_cluster = hungarian_mapping(y_true, y_pred)
+    total = float(sum(w[r, c] for c, r in class_to_cluster.items()) / y_pred.size)
 
     def subset_acc(classes) -> float:
         hits = sum(w[class_to_cluster[c], c] for c in classes)

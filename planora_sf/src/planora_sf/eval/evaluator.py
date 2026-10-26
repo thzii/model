@@ -9,14 +9,15 @@ samples are fixed to their class. Every sample is therefore either ``KNOWN``
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import Enum
-from typing import Optional
+from typing import Mapping, Optional, Sequence
 
 import torch
 import torch.nn.functional as F
 
 from planora_sf.config import EvalConfig
+from planora_sf.eval.diagnostics import cluster_structure, novel_accuracy_by_tier, per_class_accuracy_v2, routing_matrix
 from planora_sf.eval.metrics import AccuracyReport, split_cluster_acc_v1, split_cluster_acc_v2
 from planora_sf.pseudo_labels.bssk import semi_supervised_kmeans
 
@@ -79,3 +80,28 @@ class GCDEvaluator:
         pred = prediction.cluster_ids[mask].cpu().numpy()
         known = y < self.num_known
         return {"v1": split_cluster_acc_v1(y, pred, known), "v2": split_cluster_acc_v2(y, pred, known)}
+
+    def score_detailed(
+        self,
+        prediction: GCDPrediction,
+        y_true: torch.Tensor,
+        eval_mask: torch.Tensor,
+        tiers: Optional[Mapping[str, Sequence[int]]] = None,
+    ) -> dict:
+        """``score()`` plus the diagnostics of ``eval.diagnostics`` (plan T1), as plain Python types.
+
+        ``tiers`` maps a tier name to target ids (e.g. the SSB novel difficulty tiers).
+        ``v1``/``v2`` are exactly ``score()``'s numbers, so they keep its NaN for an empty
+        subset; ``cli.evaluate`` writes those as JSON ``null``.
+        """
+        mask = eval_mask.bool()
+        y = y_true[mask].cpu().numpy()
+        pred = prediction.cluster_ids[mask].cpu().numpy()
+        n_clusters = prediction.num_known_clusters
+        return {
+            **{name: asdict(report) for name, report in self.score(prediction, y_true, eval_mask).items()},
+            "routing": routing_matrix(y, pred, self.num_known, n_clusters),
+            "per_class_v2": per_class_accuracy_v2(y, pred),
+            "structure": cluster_structure(y, pred, self.num_known, n_clusters),
+            "tiers": novel_accuracy_by_tier(y, pred, tiers) if tiers is not None else None,
+        }
