@@ -180,6 +180,33 @@ class ClsHeadConfig:
 
 
 @dataclass
+class DebGCDConfig:
+    # DebGCD (arXiv 2504.04804) in the adapted form of plan §2.2. Values are the paper's
+    # (Eq. 14, §5.1, App. K); the upstream CUB script differs (docs/debgcd_port.md, DG-07).
+    enabled: bool = False  # E2/E3 toggle; False builds no heads and changes nothing
+    lam_sdl: float = 0.01  # λ_sdl, §5.1 (upstream scripts/train_cub.cmd: 0.005)
+    lam_adl: float = 1.0  # λ_adl, §5.1 (upstream CUB: 4.0, split 0.5/0.5 by --pl_loss_weight)
+    threshold: float = 0.85  # τ of Eq. 11, best in the paper's ablation (upstream CUB: 0.65)
+    tau_a: float = 0.1  # Eq. 8 (upstream --pseudo_temp)
+    tau_ova: float = 0.1  # detector logit temperature, upstream train_DebGCD.py:133
+    tau_p: float = 0.1  # DG-01: temperature of the centroid posterior (COMPOSED, = τ_a)
+    detector_layers: int = 5  # App. K; upstream --num_ood_layers
+    detector_hidden_dim: int = 2048  # upstream DebGCDHead
+    detector_bottleneck_dim: int = 256  # upstream DebGCDHead
+    consistency_filter: bool = True  # Eq. 9 F_i; the upstream code omits it (DG-11)
+    align_clusters: bool = True  # C2: Hungarian-align novel level-0 ids across epochs
+
+    def __post_init__(self) -> None:
+        for name in ("lam_sdl", "lam_adl"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"debgcd.{name} must be >= 0")
+        if not 0.0 <= self.threshold < 1.0:
+            raise ValueError("debgcd.threshold must be in [0, 1)")
+        for name in ("tau_a", "tau_ova", "tau_p", "detector_layers", "detector_hidden_dim", "detector_bottleneck_dim"):
+            _check_positive(f"debgcd.{name}", getattr(self, name))
+
+
+@dataclass
 class OptimConfig:
     # SelEx code (U-23: FourEx states none of these except the batch size)
     lr: float = 0.1  # ct.py:657
@@ -249,6 +276,7 @@ class PlanoraSFConfig:
     selex: SelExConfig = field(default_factory=SelExConfig)
     weights: LossWeights = field(default_factory=LossWeights)
     cls_head: ClsHeadConfig = field(default_factory=ClsHeadConfig)
+    debgcd: DebGCDConfig = field(default_factory=DebGCDConfig)
     optim: OptimConfig = field(default_factory=OptimConfig)
     eval: EvalConfig = field(default_factory=EvalConfig)
     data: DataConfig = field(default_factory=DataConfig)
@@ -276,6 +304,30 @@ class PlanoraSFConfig:
         cfg.selex.smoothing_alpha = README_SMOOTHING.get(name, cfg.selex.smoothing_alpha)
         cfg.selex.balanced = name not in UNBALANCED_DATASETS
         return cfg
+
+    def set_components(self, *, fourex: Optional[bool] = None, debgcd: Optional[bool] = None) -> "PlanoraSFConfig":
+        """Experiment-matrix toggles (plan §4.2); ``None`` leaves a component as configured.
+
+        FourEx off = E0's definition: weights 0 and no L_cls head, keeping the 4-view
+        forward pass so compute and RNG use match E1. FourEx on restores FX-P Table 5.
+        """
+        if fourex is not None:
+            weight = 0.1 if fourex else 0.0
+            self.weights.low = self.weights.high = self.weights.cls = weight
+            self.cls_head.enabled = fourex
+        if debgcd is not None:
+            self.debgcd.enabled = debgcd
+        return self
+
+    def components(self) -> dict[str, Any]:
+        """Which of SelEx + {FourEx, DebGCD} are active, plus the plan §4.2 row when it is a pure one."""
+        w = self.weights
+        fourex_off = w.low == w.high == w.cls == 0.0 and not self.cls_head.enabled
+        fourex_on = w.low == w.high == w.cls == 0.1 and self.cls_head.enabled
+        row = None
+        if self.base == "selex" and (fourex_on or fourex_off):
+            row = f"E{int(fourex_on) + 2 * int(self.debgcd.enabled)}"
+        return {"fourex": not fourex_off, "debgcd": self.debgcd.enabled, "row": row}
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)

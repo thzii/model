@@ -33,6 +33,7 @@ src/planora_sf/
   eval/                       evaluator.py (KNOWN / NOVEL_CLUSTER API), metrics.py (Hungarian v1/v2),
                               features.py, estimate_k.py (NotImplementedError)
   engine/                     step.py (one loss evaluation), optim.py (SGD + cosine), train.py (NotImplementedError)
+  debgcd/                     DebGCD port (E2/E3): heads.py, losses.py (Eq. 4-13), surrogate.py (SelEx adapters)
 tests/                        pytest suite, synthetic tensors only
 ```
 
@@ -58,3 +59,17 @@ On a GPU machine, `CUB_ROOT=/data/cub DEVICE=cuda bash scripts/stage_d_cub_check
 - `PlanoraSFConfig.for_dataset("cub")` applies the FX-A Table 7 cut-off and the SelEx README smoothing value.
 - `selex_compat=True` reproduces the official SelEx code behaviour (spec §8). `selex.target_mode` can override it per component.
 - The SelEx pseudo-label ordering bug (D-08) is **off** by default. Set `selex.reproduce_label_order_bug=True` to replicate it.
+
+## Experiment rows and DebGCD
+
+`cli.train` toggles the plan §4.2 rows on top of any config. A component without a flag stays as configured.
+
+```bash
+python -m planora_sf.cli.train --dataset cub --no-use-fourex                 # E0  SelEx
+python -m planora_sf.cli.train --dataset cub                                 # E1  SelEx + FourEx (reference config)
+python -m planora_sf.cli.train --dataset cub --no-use-fourex --use-debgcd    # E2  SelEx + DebGCD
+python -m planora_sf.cli.train --dataset cub --use-debgcd                    # E3  all three
+```
+
+The run summary reports `components` (including the row). DebGCD is the adapted port of the research plan (§2.2). Its paper-vs-code choices and open items are listed in [docs/debgcd_port.md](docs/debgcd_port.md).
+

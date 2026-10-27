@@ -33,13 +33,21 @@ class HierarchyLevel:
 class PseudoLabelBatch:
     level_labels: list[torch.Tensor]  # one [B] tensor per level
     radii: list[torch.Tensor]  # one [K_i] tensor per level
+    centers: Optional[torch.Tensor] = None  # [K, F] level-0 centres (DebGCD centroid posterior)
+    num_known_clusters: Optional[int] = None  # level-0 clusters anchored to known classes
 
     def repeat_views(self, n_views: int) -> "PseudoLabelBatch":
         """Tile labels for ``n_views`` stacked views (rows ordered view-major)."""
-        return PseudoLabelBatch([labels.repeat(n_views) for labels in self.level_labels], list(self.radii))
+        return PseudoLabelBatch(
+            [labels.repeat(n_views) for labels in self.level_labels], list(self.radii), self.centers,
+            self.num_known_clusters,
+        )
 
     def to(self, device) -> "PseudoLabelBatch":
-        return PseudoLabelBatch([labels.to(device) for labels in self.level_labels], [r.to(device) for r in self.radii])
+        return PseudoLabelBatch(
+            [labels.to(device) for labels in self.level_labels], [r.to(device) for r in self.radii],
+            None if self.centers is None else self.centers.to(device), self.num_known_clusters,
+        )
 
 
 @dataclass
@@ -51,7 +59,11 @@ class PseudoLabelState:
         return len(self.levels)
 
     def batch(self, indices: torch.Tensor) -> PseudoLabelBatch:
-        return PseudoLabelBatch([lvl.labels[indices] for lvl in self.levels], [lvl.radii for lvl in self.levels])
+        base = self.levels[0]
+        return PseudoLabelBatch(
+            [lvl.labels[indices] for lvl in self.levels], [lvl.radii for lvl in self.levels], base.centers,
+            base.num_known_clusters,
+        )
 
 
 def cluster_radii(centers: torch.Tensor) -> torch.Tensor:

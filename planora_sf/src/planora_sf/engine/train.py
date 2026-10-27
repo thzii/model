@@ -23,6 +23,7 @@ from planora_sf.config import PlanoraSFConfig
 from planora_sf.data.factory import GCDDatasets
 from planora_sf.data.gcd_dataset import GCDTrainDataset
 from planora_sf.data.sampler import build_gcd_sampler
+from planora_sf.debgcd.surrogate import align_novel_clusters, permute_level
 from planora_sf.engine.optim import build_optimizer, build_scheduler
 from planora_sf.engine.step import TrainBatch, compute_losses, refresh_pseudo_labels
 from planora_sf.eval.metrics import AccuracyReport
@@ -68,6 +69,24 @@ def refresh_from_dataset(
         feats, dataset.is_labelled, dataset.train_targets, dataset.split.num_known, dataset.split.num_novel,
         cfg, generator=generator,
     )
+
+
+def align_to_previous(state: PseudoLabelState, previous: Optional[PseudoLabelState], num_known: int) -> PseudoLabelState:
+    """DebGCD only: keep level-0 novel cluster ids stable across epochs (plan C2).
+
+    Checks that every known class anchors its own level-0 cluster, so that cluster j is
+    known class j for the debiased classifier (DG-08).
+    """
+    base = state.levels[0]
+    if base.num_known_clusters != num_known:
+        raise ValueError(
+            f"DG-08: {base.num_known_clusters} of {num_known} known classes have labelled samples; "
+            "level-0 cluster ids would not match known-class targets"
+        )
+    if previous is None:
+        return state
+    perm = align_novel_clusters(previous.levels[0].centers, base.centers, num_known)
+    return PseudoLabelState([permute_level(base, perm), *state.levels[1:]])
 
 
 def train_one_epoch(
@@ -160,11 +179,15 @@ def fit(
     prototype_dataset = train if cfg.loop.prototype_features == "train_view0" else datasets.train_eval
 
     result = FitResult()
+    previous: Optional[PseudoLabelState] = None
     for epoch in range(num_epochs):
         start = time.perf_counter()
         state = refresh_from_dataset(  # phase A
             model, prototype_dataset, cfg, device=device, batch_size=cfg.optim.batch_size, generator=generator
         )
+        if cfg.debgcd.enabled:
+            state = align_to_previous(state, previous if cfg.debgcd.align_clusters else None, train.split.num_known)
+            previous = state
         lr = optimizer.param_groups[0]["lr"]
         steps, losses = train_one_epoch(  # phase B
             model, fourier, loader, state, optimizer, cfg,

@@ -11,13 +11,15 @@ from typing import Optional
 import torch
 
 from planora_sf.config import PlanoraSFConfig
+from planora_sf.debgcd.losses import debgcd_terms
+from planora_sf.debgcd.surrogate import centroid_posterior
 from planora_sf.fourier.views import FourierViewGenerator, FourierViews
 from planora_sf.latent.partition import high_width, low_width
 from planora_sf.losses.contrastive import ContrastiveSettings
 from planora_sf.losses.fourex import cls_loss, high_loss, low_loss
 from planora_sf.losses.gcd import gcd_loss
 from planora_sf.losses.selex import selex_loss
-from planora_sf.losses.total import LossBreakdown, combine_losses
+from planora_sf.losses.total import LossBreakdown, add_debgcd, combine_losses
 from planora_sf.models.model import PlanoraSFModel
 from planora_sf.pseudo_labels.hssk import PseudoLabelBatch, PseudoLabelState, build_hierarchy
 from planora_sf.pseudo_labels.target_matrix import build_use_targets
@@ -71,7 +73,11 @@ def compute_losses(
     *,
     generator: Optional[torch.Generator] = None,
 ) -> tuple[LossBreakdown, FourierViews]:
-    """Forward the 4-view batch [x(1); x(2); l; h] and evaluate L_total (FX-P Eq. 9)."""
+    """Forward the 4-view batch [x(1); x(2); l; h] and evaluate L_total (FX-P Eq. 9).
+
+    With ``cfg.debgcd.enabled`` this adds λ_sdl L_sdl + λ_adl L_adl (DebGCD Eq. 14, plan §2.2),
+    computed on the CLS of x(1) and x(2) only: never on the Fourier views (plan C4).
+    """
     if not cfg.fourier.extra_views:
         raise NotImplementedError("U-01: the 'substitute x(2)' variant is not scaffolded (Stage C)")
     if cfg.fourier.filtered_view != "x1":
@@ -119,4 +125,26 @@ def compute_losses(
     else:
         cls = out.z.sum() * 0.0
 
-    return combine_losses(base, low, high, cls, cfg.weights), views
+    losses = combine_losses(base, low, high, cls, cfg.weights)
+    if cfg.debgcd.enabled:
+        losses = _add_debgcd(model, torch.cat([c1, c2]), batch, pseudo, cfg, losses)
+    return losses, views
+
+
+def _add_debgcd(
+    model: PlanoraSFModel, cls: torch.Tensor, batch: TrainBatch, pseudo: PseudoLabelBatch, cfg: PlanoraSFConfig,
+    losses: LossBreakdown,
+) -> LossBreakdown:
+    """DebGCD terms on ``cls [2B, F]``; p_i comes from the level-0 BSSK centroids (plan §2.1, C1)."""
+    if model.debgcd is None:
+        raise ValueError("debgcd.enabled but the model has no DebGCD heads: build it with build_model(cfg, ...)")
+    if pseudo.centers is None or pseudo.num_known_clusters is None:
+        raise ValueError("DebGCD needs the level-0 centres in the pseudo-label batch")
+    dg = cfg.debgcd
+    ova_logits, deb_logits = model.debgcd(cls)
+    posterior = centroid_posterior(cls.detach(), pseudo.centers, dg.tau_p)
+    terms = debgcd_terms(
+        ova_logits, deb_logits, posterior, batch.targets.repeat(2), batch.labelled.bool().repeat(2),
+        pseudo.num_known_clusters, threshold=dg.threshold, consistency_filter=dg.consistency_filter,
+    )
+    return add_debgcd(losses, terms.sdl, terms.adl, dg.lam_sdl, dg.lam_adl, {"adl_utilisation": terms.utilisation})

@@ -133,7 +133,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         train_source, test_source, split, image_size=cfg.backbone.image_size, crop_pct=cfg.loop.crop_pct
     )
     if ckpt is not None:
-        model = build_model(cfg, num_known_classes=split.num_known, pretrained=False)
+        model = build_model(cfg, num_known_classes=split.num_known, pretrained=False, num_classes=split.num_classes)
         model.load_state_dict(ckpt["model"])
     else:
         model = build_model(cfg, num_known_classes=split.num_known)

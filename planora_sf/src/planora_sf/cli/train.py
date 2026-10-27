@@ -6,6 +6,13 @@ GPU dry run on CUB (a few steps, to check memory and timing; not a result):
 
 Offline smoke run on synthetic data with the tiny ViT:
     python -m planora_sf.cli.train --dataset dummy --epochs 1 --max-steps 2 --batch-size 8
+
+Experiment rows (plan §4.2) on top of the chosen config:
+    E0 SelEx           --no-use-fourex
+    E1 SelEx+FourEx    --use-fourex            (the reference config already is E1)
+    E2 SelEx+DebGCD    --no-use-fourex --use-debgcd
+    E3 all three       --use-fourex --use-debgcd
+Without a flag, a component stays as the config sets it.
 """
 from __future__ import annotations
 
@@ -46,7 +53,7 @@ def build_config(args: argparse.Namespace) -> PlanoraSFConfig:
         cfg.loop.max_steps_per_epoch = args.max_steps
     if args.num_workers is not None:
         cfg.loop.num_workers = args.num_workers
-    return cfg
+    return cfg.set_components(fourex=args.use_fourex, debgcd=args.use_debgcd)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -63,6 +70,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--checkpoint-dir", type=Path, default=None)
     parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--use-fourex", "--use_four_ex", dest="use_fourex", action=argparse.BooleanOptionalAction,
+                        default=None, help="FourEx losses and L_cls head on/off (off = E0/E2)")
+    parser.add_argument("--use-debgcd", "--use_debgcd", dest="use_debgcd", action=argparse.BooleanOptionalAction,
+                        default=None, help="DebGCD detector + debiased classifier on/off (E2/E3)")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -73,12 +84,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     datasets = build_gcd_datasets(
         train_source, test_source, split, image_size=cfg.backbone.image_size, crop_pct=cfg.loop.crop_pct
     )
-    model = build_model(cfg, num_known_classes=split.num_known)
+    model = build_model(cfg, num_known_classes=split.num_known, num_classes=split.num_classes)
     result = fit(
         model, datasets, cfg, device=args.device, epochs=args.epochs,
         checkpoint_dir=args.checkpoint_dir, generator=torch.Generator().manual_seed(args.seed),
     )
     summary = {
+        "components": cfg.components(),
         "split": split.summary(train_source.targets),
         "history": [asdict(h) for h in result.history],
         "evaluations": [{"epoch": e, **{k: asdict(v) for k, v in s.items()}} for e, s in result.evaluations],

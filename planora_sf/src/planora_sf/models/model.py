@@ -1,4 +1,4 @@
-"""PLANORA-SF network: backbone -> (DINOHead -> ℓ2 = z, linear L_cls head)."""
+"""PLANORA-SF network: backbone -> (DINOHead -> ℓ2 = z, linear L_cls head, optional DebGCD heads)."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from planora_sf.config import PlanoraSFConfig
+from planora_sf.debgcd.heads import DebGCDHeads
 from planora_sf.models.backbone import BackboneAdapter, build_backbone
 from planora_sf.models.cls_head import LinearClsHead
 from planora_sf.models.projection_head import DINOHead
@@ -22,11 +23,18 @@ class ModelOutput:
 
 
 class PlanoraSFModel(nn.Module):
-    def __init__(self, backbone: BackboneAdapter, head: DINOHead, cls_head: Optional[nn.Module] = None):
+    def __init__(
+        self,
+        backbone: BackboneAdapter,
+        head: DINOHead,
+        cls_head: Optional[nn.Module] = None,
+        debgcd: Optional[DebGCDHeads] = None,
+    ):
         super().__init__()
         self.backbone = backbone
         self.head = head
         self.cls_head = cls_head
+        self.debgcd = debgcd  # applied by engine.step to the two standard views only (plan C4)
 
     @property
     def latent_dim(self) -> int:
@@ -45,6 +53,7 @@ def build_model(
     *,
     backbone: Optional[BackboneAdapter] = None,
     pretrained: bool = True,
+    num_classes: Optional[int] = None,
 ) -> PlanoraSFModel:
     backbone = backbone if backbone is not None else build_backbone(cfg.backbone, pretrained=pretrained)
     head = DINOHead(
@@ -59,4 +68,9 @@ def build_model(
         if cfg.cls_head.input != "cls":
             raise NotImplementedError("U-17: only the CLS-input classification head is scaffolded")
         cls_head = LinearClsHead(backbone.feat_dim, cfg.cls_head.num_classes or num_known_classes)
-    return PlanoraSFModel(backbone, head, cls_head)
+    debgcd = None
+    if cfg.debgcd.enabled:  # built last, so the existing heads' initialisation draws are unchanged
+        if num_classes is None:
+            raise ValueError("DebGCD needs num_classes (known + novel) for the debiased classifier")
+        debgcd = DebGCDHeads(backbone.feat_dim, num_known_classes, num_classes, cfg.debgcd)
+    return PlanoraSFModel(backbone, head, cls_head, debgcd)

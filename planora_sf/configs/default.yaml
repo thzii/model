@@ -63,6 +63,20 @@ cls_head:                     # U-17 (unspecified in FourEx)
   loss: sigmoid_bce
   num_classes: null           # null -> number of known classes
 
+debgcd:                       # DebGCD (arXiv 2504.04804), adapted port (plan §2.2); docs/debgcd_port.md
+  enabled: false              # E2/E3 toggle
+  lam_sdl: 0.01               # §5.1 (upstream CUB script: 0.005)
+  lam_adl: 1.0                # §5.1 (upstream CUB script: 4.0 x 0.5/0.5)
+  threshold: 0.85             # tau, Eq. 11 (upstream CUB script: 0.65)
+  tau_a: 0.1                  # Eq. 8
+  tau_ova: 0.1                # upstream train_DebGCD.py:133
+  tau_p: 0.1                  # DG-01 (centroid posterior, composed)
+  detector_layers: 5          # App. K
+  detector_hidden_dim: 2048
+  detector_bottleneck_dim: 256
+  consistency_filter: true    # Eq. 9; upstream code omits it (DG-11)
+  align_clusters: true        # C2
+
 optim:                        # SelEx code (U-23)
   lr: 0.1
   momentum: 0.9
