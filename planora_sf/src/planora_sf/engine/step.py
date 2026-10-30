@@ -84,6 +84,8 @@ def compute_losses(
         raise NotImplementedError("U-01: only filtering x(1) is scaffolded")
     if cfg.fourier.blur_anchor:
         raise NotImplementedError("U-03: a blurred anchor needs a fifth forward pass; not scaffolded")
+    if cfg.hypcd.enabled:
+        raise NotImplementedError("HypCD losses are plan Phase 4; z is on the Poincaré ball and needs them")
 
     settings = ContrastiveSettings.from_config(cfg)
     lam, alpha, loss_type = cfg.selex.lam, cfg.selex.smoothing_alpha, cfg.selex.use_loss

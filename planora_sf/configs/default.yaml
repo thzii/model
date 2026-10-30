@@ -77,6 +77,15 @@ debgcd:                       # DebGCD (arXiv 2504.04804), adapted port (plan §
   consistency_filter: true    # Eq. 9; upstream code omits it (DG-11)
   align_clusters: true        # C2
 
+hypcd:                        # HypCD (arXiv 2504.06120), Hyp-SelEx; upstream values are H-xx (plan §2)
+  enabled: false              # E4 toggle
+  curvature: 0.05             # c, paper (upstream script: 0.1)
+  clip_r: 2.3                 # r, paper (upstream script: 2.0)
+  alpha_max: 1.0              # alpha_d max, fine-grained
+  alpha_epoch_offset: 0       # paper 0 | upstream 1 (H-06)
+  angle_similarity: cosine    # paper | neg_euclidean (upstream Hyp-SelEx, H-01)
+  project_eps: 1.0e-3         # upstream safety projection
+
 optim:                        # SelEx code (U-23)
   lr: 0.1
   momentum: 0.9

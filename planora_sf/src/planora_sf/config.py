@@ -207,6 +207,30 @@ class DebGCDConfig:
 
 
 @dataclass
+class HypCDConfig:
+    # HypCD (arXiv 2504.06120) applied to SelEx (Hyp-SelEx), plan Phases 2-5. Paper values by
+    # default; upstream script values (scripts/train_HypSelEx.cmd) noted as H-xx (plan §2).
+    enabled: bool = False  # E4 toggle; False leaves z = ℓ2(head(cls)) and changes nothing
+    curvature: float = 0.05  # c, paper §4 fine-grained (upstream CUB/Cars DINOv1: 0.1, H-02)
+    clip_r: float = 2.3  # r, paper ablation optimum for CUB (upstream script: 2.0, H-03)
+    alpha_max: float = 1.0  # α_d^max, paper supplement fine-grained (= upstream --hyper_max_weight)
+    alpha_epoch_offset: int = 0  # α_d = α_max·(e + δ)/E: paper δ = 0, upstream δ = 1 (H-06)
+    angle_similarity: str = "cosine"  # paper; "neg_euclidean" on ball points is upstream Hyp-SelEx (H-01)
+    project_eps: float = 1e-3  # upstream pmath._project: max radius (1 - eps)/√c
+
+    def __post_init__(self) -> None:
+        _check_positive("hypcd.curvature", self.curvature)
+        _check_positive("hypcd.clip_r", self.clip_r)
+        if not 0.0 <= self.alpha_max <= 1.0:
+            raise ValueError("hypcd.alpha_max must be in [0, 1]")
+        if self.alpha_epoch_offset < 0:
+            raise ValueError("hypcd.alpha_epoch_offset must be >= 0")
+        _check_choice("hypcd.angle_similarity", self.angle_similarity, {"cosine", "neg_euclidean"})
+        if not 0.0 < self.project_eps < 1.0:
+            raise ValueError("hypcd.project_eps must be in (0, 1)")
+
+
+@dataclass
 class OptimConfig:
     # SelEx code (U-23: FourEx states none of these except the batch size)
     lr: float = 0.1  # ct.py:657
@@ -277,6 +301,7 @@ class PlanoraSFConfig:
     weights: LossWeights = field(default_factory=LossWeights)
     cls_head: ClsHeadConfig = field(default_factory=ClsHeadConfig)
     debgcd: DebGCDConfig = field(default_factory=DebGCDConfig)
+    hypcd: HypCDConfig = field(default_factory=HypCDConfig)
     optim: OptimConfig = field(default_factory=OptimConfig)
     eval: EvalConfig = field(default_factory=EvalConfig)
     data: DataConfig = field(default_factory=DataConfig)
@@ -325,7 +350,8 @@ class PlanoraSFConfig:
         fourex_off = w.low == w.high == w.cls == 0.0 and not self.cls_head.enabled
         fourex_on = w.low == w.high == w.cls == 0.1 and self.cls_head.enabled
         row = None
-        if self.base == "selex" and (fourex_on or fourex_off):
+        # Rows with HypCD (E4) are named once its loss exists (plan Phases 1, 4).
+        if self.base == "selex" and not self.hypcd.enabled and (fourex_on or fourex_off):
             row = f"E{int(fourex_on) + 2 * int(self.debgcd.enabled)}"
         return {"fourex": not fourex_off, "debgcd": self.debgcd.enabled, "row": row}
 
