@@ -34,6 +34,7 @@ src/planora_sf/
                               features.py, estimate_k.py (NotImplementedError)
   engine/                     step.py (one loss evaluation), optim.py (SGD + cosine), train.py (NotImplementedError)
   debgcd/                     DebGCD port (E2/E3): heads.py, losses.py (Eq. 4-13), surrogate.py (SelEx adapters)
+  hyperbolic/                 HypCD (E4): poincare.py (ball operations), layers.py (ToPoincare)
 tests/                        pytest suite, synthetic tensors only
 ```
 
@@ -69,7 +70,22 @@ python -m planora_sf.cli.train --dataset cub --no-use-fourex                 # E
 python -m planora_sf.cli.train --dataset cub                                 # E1  SelEx + FourEx (reference config)
 python -m planora_sf.cli.train --dataset cub --no-use-fourex --use-debgcd    # E2  SelEx + DebGCD
 python -m planora_sf.cli.train --dataset cub --use-debgcd                    # E3  all three
+python -m planora_sf.cli.train --dataset cub --no-use-fourex --use-hypcd     # E4  Hyp-SelEx
 ```
 
 The run summary reports `components` (including the row). DebGCD is the adapted port of the research plan (§2.2). Its paper-vs-code choices and open items are listed in [docs/debgcd_port.md](docs/debgcd_port.md).
+
+The HypCD port, its paper-vs-code choices and its numerics are described in [docs/hypcd_port.md](docs/hypcd_port.md).
+
+## Stanford Cars
+
+There is no official download any more. Fetch the files by hand, then import and verify them:
+
+```bash
+python -m planora_sf.cli.prepare_scars --root /data/scars --from-archive     car_devkit.tgz cars_train.tgz cars_test.tgz cars_test_annos_withlabels.mat
+export SCARS_ROOT=/data/scars
+python -m planora_sf.cli.train --dataset stanford_cars --device cuda
+```
+
+`prepare_scars` also accepts zip/tar copies with other nesting (e.g. Kaggle). The labelled test file is optional, because the reported metric uses only the train split. See [docs/hypcd_port.md](docs/hypcd_port.md#stanford-cars).
 
