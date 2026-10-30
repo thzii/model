@@ -5,6 +5,7 @@ It is not a training loop: no data loading, no epochs, no checkpointing.
 """
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from typing import Optional
 
@@ -15,7 +16,7 @@ from planora_sf.debgcd.losses import debgcd_terms
 from planora_sf.debgcd.surrogate import centroid_posterior
 from planora_sf.fourier.views import FourierViewGenerator, FourierViews
 from planora_sf.latent.partition import high_width, low_width
-from planora_sf.losses.contrastive import ContrastiveSettings
+from planora_sf.losses.contrastive import ContrastiveSettings, NegPoincare
 from planora_sf.losses.fourex import cls_loss, high_loss, low_loss
 from planora_sf.losses.gcd import gcd_loss
 from planora_sf.losses.selex import selex_loss
@@ -72,11 +73,14 @@ def compute_losses(
     cfg: PlanoraSFConfig,
     *,
     generator: Optional[torch.Generator] = None,
+    hyp_alpha: Optional[float] = None,
 ) -> tuple[LossBreakdown, FourierViews]:
     """Forward the 4-view batch [x(1); x(2); l; h] and evaluate L_total (FX-P Eq. 9).
 
     With ``cfg.debgcd.enabled`` this adds λ_sdl L_sdl + λ_adl L_adl (DebGCD Eq. 14, plan §2.2),
     computed on the CLS of x(1) and x(2) only: never on the Fourier views (plan C4).
+    With ``cfg.hypcd.enabled`` every contrastive term on z mixes the Poincaré-distance and the
+    angle branch with weight ``hyp_alpha`` = α_d of the current epoch (HypCD; plan Phase 4).
     """
     if not cfg.fourier.extra_views:
         raise NotImplementedError("U-01: the 'substitute x(2)' variant is not scaffolded (Stage C)")
@@ -84,8 +88,8 @@ def compute_losses(
         raise NotImplementedError("U-01: only filtering x(1) is scaffolded")
     if cfg.fourier.blur_anchor:
         raise NotImplementedError("U-03: a blurred anchor needs a fifth forward pass; not scaffolded")
-    if cfg.hypcd.enabled:
-        raise NotImplementedError("HypCD losses are plan Phase 4; z is on the Poincaré ball and needs them")
+    if cfg.hypcd.enabled and (hyp_alpha is None or not 0.0 <= hyp_alpha <= 1.0):
+        raise ValueError(f"HypCD needs hyp_alpha = α_d in [0, 1] for this epoch, got {hyp_alpha}")
 
     settings = ContrastiveSettings.from_config(cfg)
     lam, alpha, loss_type = cfg.selex.lam, cfg.selex.smoothing_alpha, cfg.selex.use_loss
@@ -98,28 +102,51 @@ def compute_losses(
     pseudo2 = pseudo.repeat_views(2)
     mode = cfg.resolved_target_mode
 
-    if cfg.base == "selex":
-        base_targets = build_use_targets(mode, pseudo2, backbone_feats=torch.cat([c1, c2]))
-        base = selex_loss(
-            z1, z2, targets, labelled, pseudo.level_labels, base_targets,
-            lam=lam, alpha=alpha, settings=settings, loss_type=loss_type,
-        ).total
-    else:
-        base = gcd_loss(z1, z2, targets, labelled, lam=lam, settings=settings)
-
+    # USE targets come from backbone CLS / pseudo-labels in every geometry (upstream HypSelEx too).
+    base_targets = build_use_targets(mode, pseudo2, backbone_feats=torch.cat([c1, c2])) if cfg.base == "selex" else None
     dim = out.z.shape[1]
     half = cfg.latent.fraction_of_half
     d_low = low_width(views.f_low.cpu(), cfg.fourier.t_low(), dim, fraction_of_half=half)
     d_high = high_width(
         views.f_high.cpu(), cfg.fourier.t_high(), dim, mode=cfg.latent.high_fraction_mode, fraction_of_half=half
     )
-
     low_targets = build_use_targets(mode, pseudo2, backbone_feats=torch.cat([c1, c_low]))
-    low = low_loss(
-        z1, z_low, d_low, targets, labelled, pseudo.level_labels, low_targets,
-        lam=lam, alpha=alpha, settings=settings, loss_type=loss_type,
-    )
-    high = high_loss(z1, z_high, d_high, targets, labelled, lam=lam, settings=settings)
+
+    def contrastive_terms(s: ContrastiveSettings) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """(L_base, L_low, L_high) on z under similarity ``s.similarity``."""
+        if cfg.base == "selex":
+            base = selex_loss(
+                z1, z2, targets, labelled, pseudo.level_labels, base_targets,
+                lam=lam, alpha=alpha, settings=s, loss_type=loss_type,
+            ).total
+        else:
+            base = gcd_loss(z1, z2, targets, labelled, lam=lam, settings=s)
+        low = low_loss(
+            z1, z_low, d_low, targets, labelled, pseudo.level_labels, low_targets,
+            lam=lam, alpha=alpha, settings=s, loss_type=loss_type,
+        )
+        high = high_loss(z1, z_high, d_high, targets, labelled, lam=lam, settings=s)
+        return base, low, high
+
+    hyp_stats: dict[str, float] = {}
+    if cfg.hypcd.enabled:
+        # HypCD hybrid loss: ℓ^H = α_d ℓ[-d_c] + (1 - α_d) ℓ[S_ang] for every contrastive term
+        # (paper Eq. 16-17; upstream train_HypSelEx.py:337-366). Temperatures are unchanged.
+        hyp = cfg.hypcd
+        dist_terms = contrastive_terms(dataclasses.replace(settings, similarity=NegPoincare(hyp.curvature)))
+        ang_terms = contrastive_terms(dataclasses.replace(settings, similarity=hyp.angle_similarity))
+        base, low, high = (hyp_alpha * d + (1.0 - hyp_alpha) * a for d, a in zip(dist_terms, ang_terms))
+        with torch.no_grad():
+            tangent_norm = out.z_tangent.norm(dim=1)
+            hyp_stats = {
+                "hyp_alpha": float(hyp_alpha),
+                "hyp_clip_fraction": float((tangent_norm > hyp.clip_r).float().mean()),
+                "hyp_tangent_norm": float(tangent_norm.mean()),
+                "hyp_base_dist": float(dist_terms[0]),
+                "hyp_base_ang": float(ang_terms[0]),
+            }
+    else:
+        base, low, high = contrastive_terms(settings)
 
     if out.cls_logits is not None:
         logits_x, _, logits_low, logits_high = out.cls_logits.chunk(4)
@@ -128,6 +155,7 @@ def compute_losses(
         cls = out.z.sum() * 0.0
 
     losses = combine_losses(base, low, high, cls, cfg.weights)
+    losses.stats.update(hyp_stats)
     if cfg.debgcd.enabled:
         losses = _add_debgcd(model, torch.cat([c1, c2]), batch, pseudo, cfg, losses)
     return losses, views

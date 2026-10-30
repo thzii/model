@@ -87,7 +87,7 @@ def test_build_model_validation():
         build_model(renorm, num_known_classes=3)
 
 
-def test_losses_refuse_to_run_on_ball_points_until_phase4(generator):
+def test_losses_refuse_to_run_without_alpha(generator):
     cfg = _hyp_cfg()
     model = build_model(cfg, num_known_classes=2)
     labelled = torch.arange(40) < 10
@@ -95,7 +95,7 @@ def test_losses_refuse_to_run_on_ball_points_until_phase4(generator):
     state = refresh_pseudo_labels(F.normalize(torch.randn(40, model.backbone.feat_dim), dim=1), labelled, targets,
                                   2, 2, cfg, generator=generator)
     batch = TrainBatch(torch.randn(8, 3, 32, 32), torch.randn(8, 3, 32, 32), targets[:8], labelled[:8])
-    with pytest.raises(NotImplementedError, match="Phase 4"):
+    with pytest.raises(ValueError, match="hyp_alpha"):
         compute_losses(model, FourierViewGenerator(cfg.fourier), batch, state.batch(torch.arange(8)), cfg,
                        generator=generator)
 

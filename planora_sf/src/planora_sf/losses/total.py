@@ -37,5 +37,5 @@ def add_debgcd(losses: LossBreakdown, sdl: torch.Tensor, adl: torch.Tensor, lam_
     """L_all = L_total + λ_sdl L_sdl + λ_adl L_adl (DebGCD Eq. 14, with L_gcd replaced by PLANORA-SF's L_total)."""
     return LossBreakdown(
         total=losses.total + lam_sdl * sdl + lam_adl * adl, base=losses.base, low=losses.low, high=losses.high,
-        cls=losses.cls, sdl=sdl, adl=adl, stats=dict(stats or {}),
+        cls=losses.cls, sdl=sdl, adl=adl, stats={**losses.stats, **(stats or {})},
     )

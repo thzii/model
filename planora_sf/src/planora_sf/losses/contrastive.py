@@ -1,6 +1,7 @@
 """Contrastive primitives (FX-P Eq. 1-2) as realised in the SelEx code (spec §5.1).
 
-Similarity is ``-||a - b||_2`` by default (ct.py:118,174, D-06). Every function
+Similarity is ``-||a - b||_2`` by default (ct.py:118,174, D-06). HypCD adds ``-d_c(a, b)``
+on the Poincaré ball (``NegPoincare``) and cosine similarity (plan Phase 4). Every function
 accepts an optional per-anchor boolean dimension mask ``[N, D]``, which restricts
 anchor ``a``'s similarities to the dimensions selected in row ``a``. This is
 how latent slices of different widths per sample are computed (spec §3.3).
@@ -8,19 +9,34 @@ how latent slices of different widths per sample are computed (spec §3.3).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 import torch.nn.functional as F
 
 from planora_sf.config import PlanoraSFConfig
+from planora_sf.hyperbolic.poincare import distance_from_squares
 
 _EPS = 1e-12
 
 
 @dataclass(frozen=True)
+class NegPoincare:
+    """Similarity -d_c(a, b) on the Poincaré ball of curvature -c (HypCD S_d = -D_H)."""
+
+    curvature: float
+
+    def __post_init__(self) -> None:
+        if self.curvature <= 0:
+            raise ValueError(f"NegPoincare needs curvature > 0, got {self.curvature}")
+
+
+Similarity = Union[str, NegPoincare]  # "neg_euclidean" | "dot" | "cosine" | NegPoincare(c)
+
+
+@dataclass(frozen=True)
 class ContrastiveSettings:
-    similarity: str = "neg_euclidean"
+    similarity: Similarity = "neg_euclidean"
     tau_unsup: float = 1.0
     tau_sup: float = 0.07
     renormalize_slices: bool = False
@@ -38,7 +54,7 @@ class ContrastiveSettings:
 def pairwise_similarity(
     anchor: torch.Tensor,
     contrast: torch.Tensor,
-    kind: str = "neg_euclidean",
+    kind: Similarity = "neg_euclidean",
     anchor_dim_mask: Optional[torch.Tensor] = None,
     renormalize: bool = False,
 ) -> torch.Tensor:
@@ -46,8 +62,16 @@ def pairwise_similarity(
 
     With ``anchor_dim_mask`` row ``a`` only uses the dimensions selected for anchor
     ``a`` on both sides. With ``renormalize`` the (masked) vectors are ℓ2-normalised
-    before comparison (U-14).
+    before comparison (U-14). A masked or sliced ball point stays in the lower-dimensional
+    ball, so ``NegPoincare`` on it is the distance there (upstream slices ball points too,
+    train_HypSelEx.py:356-357).
     """
+    if isinstance(kind, NegPoincare):
+        if renormalize:
+            raise ValueError("NegPoincare compares ball points; renormalising them is undefined")
+        return -_poincare_distances(anchor, contrast, kind.curvature, anchor_dim_mask)
+    if kind == "cosine":
+        return pairwise_similarity(anchor, contrast, "dot", anchor_dim_mask, renormalize=True)
     if kind not in ("neg_euclidean", "dot"):
         raise ValueError(f"unknown similarity {kind!r}")
     if anchor_dim_mask is None:
@@ -80,10 +104,29 @@ def pairwise_similarity(
     return -torch.sqrt(sq_dist.clamp_min(_EPS))
 
 
+def _poincare_distances(
+    anchor: torch.Tensor, contrast: torch.Tensor, c: float, anchor_dim_mask: Optional[torch.Tensor]
+) -> torch.Tensor:
+    """``[N, M]`` d_c from squared norms and distances, masked like the Euclidean path."""
+    if anchor_dim_mask is None:
+        a_sq = (anchor * anchor).sum(1, keepdim=True)
+        c_sq = (contrast * contrast).sum(1)[None, :]
+        sq_dist = a_sq + c_sq - 2 * anchor @ contrast.T
+    else:
+        if anchor_dim_mask.shape != anchor.shape:
+            raise ValueError("anchor_dim_mask must have the same shape as anchor")
+        m = anchor_dim_mask.to(anchor.dtype)
+        a_masked = anchor * m
+        a_sq = (a_masked * a_masked).sum(1, keepdim=True)
+        c_sq = m @ (contrast * contrast).T
+        sq_dist = a_sq + c_sq - 2 * a_masked @ contrast.T
+    return distance_from_squares(sq_dist, a_sq, c_sq, c)
+
+
 def nt_xent_logits(
     features: torch.Tensor,
     temperature: float = 1.0,
-    kind: str = "neg_euclidean",
+    kind: Similarity = "neg_euclidean",
     dim_mask: Optional[torch.Tensor] = None,
     renormalize: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -118,7 +161,7 @@ def supcon_loss(
     features: torch.Tensor,
     labels: torch.Tensor,
     temperature: float = 0.07,
-    kind: str = "neg_euclidean",
+    kind: Similarity = "neg_euclidean",
     dim_mask: Optional[torch.Tensor] = None,
     renormalize: bool = False,
 ) -> torch.Tensor:
