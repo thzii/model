@@ -18,7 +18,8 @@ from typing import Optional, Sequence
 
 import numpy as np
 
-_SSB_FILE = Path(__file__).resolve().parent / "splits" / "cub_ssb_split.json"
+_SPLIT_DIR = Path(__file__).resolve().parent / "splits"
+SSB_FILES = {"cub": _SPLIT_DIR / "cub_ssb_split.json", "scars": _SPLIT_DIR / "scars_ssb_split.json"}
 
 
 @dataclass(frozen=True)
@@ -62,17 +63,31 @@ class GCDSplit:
         }
 
 
-def cub_ssb_classes() -> tuple[list[int], list[int]]:
-    """SSB known and novel CUB classes, 0-based; novel are ordered Hard + Medium + Easy as in SelEx."""
-    data = json.loads(_SSB_FILE.read_text(encoding="utf-8"))
+def _ssb(name: str) -> dict:
+    if name not in SSB_FILES:
+        raise KeyError(f"no SSB split for dataset {name!r}; available: {sorted(SSB_FILES)}")
+    return json.loads(SSB_FILES[name].read_text(encoding="utf-8"))
+
+
+def ssb_classes(name: str) -> tuple[list[int], list[int]]:
+    """SSB known and novel classes, 0-based; novel are ordered Hard + Medium + Easy as in SelEx."""
+    data = _ssb(name)
     unknown = data["unknown_classes"]
     return list(data["known_classes"]), unknown["Hard"] + unknown["Medium"] + unknown["Easy"]
 
 
-def cub_ssb_novel_tiers() -> dict[str, list[int]]:
-    """SSB novel CUB classes by difficulty tier (0-based original ids); map with ``GCDSplit.class_to_target``."""
-    unknown = json.loads(_SSB_FILE.read_text(encoding="utf-8"))["unknown_classes"]
+def ssb_novel_tiers(name: str) -> dict[str, list[int]]:
+    """SSB novel classes by difficulty tier (0-based original ids); map with ``GCDSplit.class_to_target``."""
+    unknown = _ssb(name)["unknown_classes"]
     return {tier: list(unknown[tier]) for tier in ("Hard", "Medium", "Easy")}
+
+
+def cub_ssb_classes() -> tuple[list[int], list[int]]:
+    return ssb_classes("cub")
+
+
+def cub_ssb_novel_tiers() -> dict[str, list[int]]:
+    return ssb_novel_tiers("cub")
 
 
 def make_gcd_split(

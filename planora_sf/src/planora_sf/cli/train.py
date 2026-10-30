@@ -28,7 +28,7 @@ from typing import Optional, Sequence
 import torch
 
 from planora_sf.config import BackboneConfig, FourierConfig, HeadConfig, LatentConfig, PlanoraSFConfig
-from planora_sf.data.factory import build_gcd_datasets, build_sources, build_split
+from planora_sf.data.factory import build_gcd_datasets, build_sources, build_split, canonical_dataset, default_root
 from planora_sf.engine.train import fit
 from planora_sf.models.model import build_model
 
@@ -36,8 +36,8 @@ from planora_sf.models.model import build_model
 def build_config(args: argparse.Namespace) -> PlanoraSFConfig:
     if args.config:
         cfg = PlanoraSFConfig.from_yaml(args.config)
-    elif args.dataset == "cub":
-        cfg = PlanoraSFConfig.for_dataset("cub")
+    elif args.dataset in ("cub", "scars"):
+        cfg = PlanoraSFConfig.for_dataset(args.dataset)
     else:  # synthetic smoke run: tiny ViT, small latent space
         cfg = PlanoraSFConfig(
             backbone=BackboneConfig(name="tiny", grad_from_block=2, image_size=32),
@@ -59,8 +59,8 @@ def build_config(args: argparse.Namespace) -> PlanoraSFConfig:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--dataset", choices=["cub", "dummy"], default="cub")
-    parser.add_argument("--root", default=None)
+    parser.add_argument("--dataset", choices=["cub", "scars", "stanford_cars", "dummy"], default="cub")
+    parser.add_argument("--root", default=None, help="dataset root; default: $CUB_ROOT or $SCARS_ROOT")
     parser.add_argument("--download", action="store_true")
     parser.add_argument("--config", type=Path, default=None, help="YAML config (default: reference config)")
     parser.add_argument("--epochs", type=int, default=None, help="default: optim.epochs")
@@ -78,6 +78,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--use-hypcd", "--use_hypcd", dest="use_hypcd", action=argparse.BooleanOptionalAction,
                         default=None, help="HypCD Poincaré-ball projection space on/off (E4)")
     args = parser.parse_args(argv)
+    args.dataset = canonical_dataset(args.dataset)
+    args.root = args.root or default_root(args.dataset)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     torch.manual_seed(args.seed)

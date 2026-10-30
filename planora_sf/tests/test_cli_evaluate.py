@@ -72,11 +72,18 @@ def test_checkpoint_dataset_must_match(checkpoint, tmp_path):
         evaluate.main(["--checkpoint", str(tagged), "--dataset", "dummy", "--device", "cpu"])
 
 
-def test_root_defaults_to_cub_root_env(monkeypatch):
+def test_root_defaults_to_the_dataset_env(monkeypatch):
     monkeypatch.setenv("CUB_ROOT", "/data/cub")
-    assert evaluate.build_parser().parse_args(["--frozen-backbone"]).root == "/data/cub"
+    monkeypatch.setenv("SCARS_ROOT", "/data/scars")
+    parse = evaluate.build_parser().parse_args
+    assert evaluate.resolve_root(parse(["--frozen-backbone"])) == "/data/cub"
+    for name in ("scars", "stanford_cars"):
+        args = parse(["--frozen-backbone", "--dataset", name])
+        args.dataset = evaluate.canonical_dataset(args.dataset)
+        assert evaluate.resolve_root(args) == "/data/scars"
+    assert evaluate.resolve_root(parse(["--frozen-backbone", "--root", "/x"])) == "/x"
     monkeypatch.delenv("CUB_ROOT")
-    assert evaluate.build_parser().parse_args(["--frozen-backbone"]).root is None
+    assert evaluate.resolve_root(parse(["--frozen-backbone"])) is None
 
 
 def test_json_safe_maps_nan_and_numpy_to_plain_json():

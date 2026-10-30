@@ -58,6 +58,61 @@ def make_fake_cub(root, num_classes: int = 6, train_per_class: int = 3, test_per
     return rows
 
 
+def _write_annotations(path, rows):
+    """devkit-style ``annotations`` struct (bbox_x1..bbox_y2, class 1-based, fname) via scipy.io.savemat."""
+    import numpy as np
+    from scipy.io import savemat
+
+    dt = [(f, "O") for f in ("bbox_x1", "bbox_y1", "bbox_x2", "bbox_y2", "class", "fname")]
+    ann = np.zeros((1, len(rows)), dtype=dt)
+    for i, (fname, cls) in enumerate(rows):
+        box = [np.array([[v]], dtype=np.uint16) for v in (1, 1, 20, 20)]
+        ann[0, i] = (*box, np.array([[cls]], dtype=np.uint8), np.array([fname]))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    savemat(str(path), {"annotations": ann})
+
+
+def make_fake_scars(root, *, num_classes: int = 4, train_per_class: int = 3, test_per_class: int = 2, size: int = 24,
+                    layout: str = "torchvision", nested: bool = False, test_labels: bool = True,
+                    greyscale_every: int = 0):
+    """Write a miniature Stanford Cars tree under ``root``; returns {"train": [(fname, cls)], "test": [...]}.
+
+    ``layout="torchvision"`` uses ``root/stanford_cars/`` with the labelled test file at its top level;
+    ``"gcd"`` puts everything directly in ``root`` with the labelled test file in ``devkit/`` (GCD/SelEx).
+    ``nested`` reproduces Kaggle's ``cars_train/cars_train/``. Classes interleave across files, so the
+    loader's annotation order (not file-name order) is exercised.
+    """
+    from pathlib import Path
+
+    import numpy as np
+    from PIL import Image
+
+    base = Path(root) / "stanford_cars" if layout == "torchvision" else Path(root)
+    rows = {}
+    for split, per_class in (("train", train_per_class), ("test", test_per_class)):
+        folder = base / f"cars_{split}"
+        if nested:
+            folder = folder / f"cars_{split}"
+        folder.mkdir(parents=True, exist_ok=True)
+        items = []
+        for k in range(per_class * num_classes):
+            cls = num_classes - (k % num_classes)  # 1-based, descending: annotation order != sorted order
+            fname = f"{(k * 7919) % 100000:05d}.jpg"
+            pixels = np.full((size, size, 3), (cls * 37 + k) % 256, dtype=np.uint8)
+            img = Image.fromarray(pixels)
+            if greyscale_every and k % greyscale_every == 0:
+                img = img.convert("L")
+            img.save(folder / fname)
+            items.append((fname, cls))
+        rows[split] = items
+    _write_annotations(base / "devkit" / "cars_train_annos.mat", rows["train"])
+    if test_labels:
+        target = base / "cars_test_annos_withlabels.mat" if layout == "torchvision" else base / "devkit" / \
+            "cars_test_annos_withlabels.mat"
+        _write_annotations(target, rows["test"])
+    return rows
+
+
 def make_blobs(per_blob: list[int], dim: int = 8, spread: float = 0.05, scale: float = 10.0):
     """Well-separated Gaussian blobs: blob b is centred at scale·e_b. Returns (features, blob ids)."""
     feats, ids = [], []

@@ -10,7 +10,7 @@ Frozen-backbone floor (pretrained DINOv1, no training):
     python -m planora_sf.cli.evaluate --dataset cub --root /data/cub --device cuda \
         --frozen-backbone --eval-seeds 0,1,2,3,4
 
-``--root`` defaults to ``$CUB_ROOT``. The output is strict JSON: NaN (v1/v2 of an empty
+``--root`` defaults to ``$CUB_ROOT`` (CUB) or ``$SCARS_ROOT`` (Stanford Cars). The output is strict JSON: NaN (v1/v2 of an empty
 subset) is written as ``null``.
 """
 from __future__ import annotations
@@ -20,7 +20,6 @@ import dataclasses
 import json
 import logging
 import math
-import os
 import sys
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
@@ -29,8 +28,8 @@ import numpy as np
 import torch
 
 from planora_sf.config import PlanoraSFConfig
-from planora_sf.data.factory import build_gcd_datasets, build_sources, build_split
-from planora_sf.data.splits import cub_ssb_novel_tiers
+from planora_sf.data.factory import build_gcd_datasets, build_sources, build_split, canonical_dataset, default_root
+from planora_sf.data.splits import SSB_FILES, ssb_novel_tiers
 from planora_sf.eval.evaluator import GCDEvaluator
 from planora_sf.eval.protocol import extract_dataset_features
 from planora_sf.models.model import build_model
@@ -84,6 +83,11 @@ def json_safe(obj: Any) -> Any:
     return obj
 
 
+def resolve_root(args: argparse.Namespace) -> Optional[str]:
+    """``--root``, else ``$CUB_ROOT`` / ``$SCARS_ROOT`` for the (canonical) dataset."""
+    return args.root or default_root(args.dataset)
+
+
 def parse_seeds(text: str) -> list[int]:
     seeds = [int(s) for s in text.split(",") if s.strip()]
     if not seeds or any(s < 0 for s in seeds):
@@ -95,9 +99,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--checkpoint", type=Path, help="checkpoint written by cli.train (last.pt)")
-    source.add_argument("--frozen-backbone", action="store_true", help="pretrained DINOv1, no training (cub only)")
-    parser.add_argument("--dataset", choices=["cub", "dummy"], default="cub")
-    parser.add_argument("--root", default=os.environ.get("CUB_ROOT"), help="dataset root; default: $CUB_ROOT")
+    source.add_argument("--frozen-backbone", action="store_true", help="pretrained DINOv1, no training (cub, scars)")
+    parser.add_argument("--dataset", choices=["cub", "scars", "stanford_cars", "dummy"], default="cub")
+    parser.add_argument("--root", default=None, help="dataset root; default: $CUB_ROOT or $SCARS_ROOT")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--num-workers", type=int, default=None, help="default: loop.num_workers")
     parser.add_argument("--batch-size", type=int, default=None, help="feature extraction; default: optim.batch_size")
@@ -112,8 +116,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.frozen_backbone and args.dataset != "cub":
-        parser.error("--frozen-backbone is only supported with --dataset cub")
+    args.dataset = canonical_dataset(args.dataset)
+    args.root = resolve_root(args)
+    if args.frozen_backbone and args.dataset not in ("cub", "scars"):
+        parser.error("--frozen-backbone needs a benchmark dataset (cub or scars)")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     ckpt = None
@@ -124,7 +130,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if cfg.dataset is not None and cfg.dataset != args.dataset:
             parser.error(f"checkpoint was configured for dataset {cfg.dataset!r} but --dataset is {args.dataset!r}")
     else:
-        cfg = PlanoraSFConfig.for_dataset("cub")
+        cfg = PlanoraSFConfig.for_dataset(args.dataset)
 
     # Rebuild data exactly as cli.train does.
     train_source, test_source = build_sources(args.dataset, args.root)
@@ -150,9 +156,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         device=args.device,
     )
     tiers = None
-    if args.dataset == "cub" and cfg.data.use_ssb_splits:
+    if args.dataset in SSB_FILES and cfg.data.use_ssb_splits:
         to_target = split.class_to_target
-        tiers = {name: [to_target[c] for c in ids] for name, ids in cub_ssb_novel_tiers().items()}
+        tiers = {name: [to_target[c] for c in ids] for name, ids in ssb_novel_tiers(args.dataset).items()}
 
     evaluator = GCDEvaluator(split.num_known, split.num_classes, eval_cfg)
     per_seed = []
