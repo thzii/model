@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "planora-sf-research"
 version = "0.1.0"
-description = "PLANORA-SF research scaffold: SelEx + FourEx mechanics for fine-grained GCD (no training loop yet)"
+description = "PLANORA-SF research package: SelEx + FourEx, DebGCD and HypCD for fine-grained GCD"
 requires-python = ">=3.10"
 dependencies = ["torch>=2.1", "torchvision>=0.16", "Pillow>=9.0", "numpy>=1.24", "scipy>=1.10", "PyYAML>=6.0"]
 

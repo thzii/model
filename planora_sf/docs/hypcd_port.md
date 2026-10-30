@@ -101,7 +101,11 @@ These are written into each epoch's history; none read labels:
 | `hyp_alpha` | α_d this epoch |
 | `hyp_clip_fraction` | share of rows with ‖v‖ > r |
 | `hyp_tangent_norm` | mean ‖v‖ |
+| `hyp_tangent_norm_p5`, `_p50`, `_p95` | percentiles of ‖v‖ (how far the clip saturates) |
+| `hyp_radius_mean`, `hyp_radius_std` | hyperbolic radius d_c(0, z) = 2·min(‖v‖, r) before the safety projection |
 | `hyp_base_dist`, `hyp_base_ang` | the SelEx base loss under each branch |
+
+Per-step values are averaged over the epoch's steps. The gradient monitor (`--grad-monitor-every`) additionally compares the two branches' gradients on the trainable blocks (`hyp_dist`, `hyp_ang`).
 
 ## Rows
 

@@ -63,9 +63,10 @@ The paper is the default wherever the two disagree. The CUB numbers in the paper
 
 ## Not yet implemented
 
-These depend on the T2 diagnostics module (plan §5), which reads unlabelled ground truth in one audited place:
+These would belong in `engine/diagnostics.py`, the one audited place that reads unlabelled ground truth:
 
 - utilisation split by ground-truth known/novel (only overall utilisation is logged now, as `adl_utilisation`);
 - AUROC of s;
-- ψ_s-argmax accuracy as a secondary metric;
-- per-head gradient norms on blocks 9–11 (C3).
+- ψ_s-argmax accuracy as a secondary metric.
+
+Per-head gradient norms on the trainable blocks (C3) are covered by the gradient monitor (`--grad-monitor-every`): the `debias` part (λ_sdl·L_sdl + λ_adl·L_adl) against `fourier` (which includes L_cls) and `base`.

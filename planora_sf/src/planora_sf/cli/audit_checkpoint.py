@@ -24,7 +24,6 @@ import itertools
 import json
 import re
 import sys
-from collections import Counter
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence

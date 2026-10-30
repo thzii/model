@@ -6,7 +6,6 @@ the labelled count per batch is Binomial(batch, p).
 """
 import math
 
-import numpy as np
 import pytest
 import torch
 from scipy.stats import chisquare

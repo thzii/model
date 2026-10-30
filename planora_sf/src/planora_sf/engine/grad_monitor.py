@@ -48,7 +48,8 @@ def gradient_stats(parts: Mapping[str, torch.Tensor], groups: Mapping[str, Seque
     """Norms and pairwise cosines of each part's gradient, over all groups together and per group.
 
     Keys: ``norm/<part>``, ``cos/<a>~<b>`` (all blocks), ``<group>/norm/<part>``, ``<group>/cos/<a>~<b>``.
-    A cosine with a zero gradient is undefined and left out.
+    A cosine with a zero gradient is undefined and left out. Gradients are copied to the CPU as float32
+    (3 ViT-B blocks x 5 parts would otherwise hold ~0.4 GB extra on the GPU) and reduced in float64.
     """
     params = [p for group in groups.values() for p in group]
     sizes = {name: sum(p.numel() for p in group) for name, group in groups.items()}
@@ -58,8 +59,10 @@ def gradient_stats(parts: Mapping[str, torch.Tensor], groups: Mapping[str, Seque
             continue
         grads = torch.autograd.grad(loss, params, retain_graph=True, allow_unused=True)
         flat[name] = torch.cat([
-            (g if g is not None else torch.zeros_like(p)).reshape(-1).double() for g, p in zip(grads, params)
+            (g if g is not None else torch.zeros_like(p)).detach().reshape(-1).to("cpu", torch.float32)
+            for g, p in zip(grads, params)
         ])
+        del grads
     out: dict[str, float] = {}
     scopes = {"": slice(None)}
     start = 0
@@ -67,10 +70,11 @@ def gradient_stats(parts: Mapping[str, torch.Tensor], groups: Mapping[str, Seque
         scopes[f"{name}/"] = slice(start, start + size)
         start += size
     for prefix, sl in scopes.items():
-        for name, g in flat.items():
-            out[f"{prefix}norm/{name}"] = float(g[sl].norm())
-        for a, b in combinations(flat, 2):
-            cos = _cos(flat[a][sl], flat[b][sl])
+        sliced = {name: g[sl].double() for name, g in flat.items()}
+        for name, g in sliced.items():
+            out[f"{prefix}norm/{name}"] = float(g.norm())
+        for a, b in combinations(sliced, 2):
+            cos = _cos(sliced[a], sliced[b])
             if cos is not None:
                 out[f"{prefix}cos/{a}~{b}"] = cos
     return out
