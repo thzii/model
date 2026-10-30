@@ -89,3 +89,17 @@ python -m planora_sf.cli.train --dataset stanford_cars --device cuda
 
 `prepare_scars` also accepts zip/tar copies with other nesting (e.g. Kaggle). The labelled test file is optional, because the reported metric uses only the train split. See [docs/hypcd_port.md](docs/hypcd_port.md#stanford-cars).
 
+
+## Audit, diagnostics and decision gates
+
+These tools support the Stanford Cars master plan: audit, reproduction, crop and combined-loss steps. All of them run offline on `--dataset dummy` or on synthetic trees.
+
+| CLI | Purpose |
+|---|---|
+| `cli.audit_checkpoint` | Fingerprints native and foreign checkpoints (dataset votes, backbone, components, provenance). Also derives w from logged All/Known/Novel. |
+| `cli.train` | Writes `last.pt` and `summary.json` with provenance: seed, commit, config hash and split hash.<br>`--label` names the run for the aggregator.<br>`--diagnostics` logs per-epoch PL-acc L0.<br>`--grad-monitor-every N` records per-loss gradient cosines.<br>`--keep-checkpoint-every N` keeps periodic checkpoints.<br>`--backbone dinov2_vitb14_reg` switches to DINOv2. |
+| `cli.evaluate` | Re-scores a checkpoint, foreign ViT weights (`--foreign-backbone`) or a frozen DINO.<br>`--eval-seeds` gives σ_eval.<br>`--logged-v2` checks the log ↔ checkpoint link.<br>`--pseudo-labels` reports offline PL-acc L0.<br>`--crop-bbox` evaluates on bounding-box crops. |
+| `cli.compare_evals` | Paired, per-seed deltas between two evaluations of the same weights, e.g. full images vs crops. Applies the Gate 3 rule. |
+| `cli.aggregate` | Groups `summary.json` runs by label, pairs them by seed and applies Gates 1–4.<br>Refuses mixed commits or splits.<br>Writes JSON and Markdown. |
+
+DINO hub code is pinned to fixed commits in `models/backbone.py`. The DINOv2 reference config is `configs/dinov2/e0_scars.yaml`.
