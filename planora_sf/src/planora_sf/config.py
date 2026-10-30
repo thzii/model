@@ -288,11 +288,12 @@ class LoopConfig:
     crop_pct: float = 0.875  # ct.py:712
     keep_checkpoint_every: int = 0  # also save epoch_XXX.pt every n epochs (offline learning curves); 0 = off
     diagnostics: bool = False  # per-epoch PL-acc L0 and routing (engine/diagnostics.py, master plan Task #2b)
+    grad_monitor_every: int = 0  # per-loss gradient cosines every n steps (engine/grad_monitor.py, Task #5); 0 = off
 
     def __post_init__(self) -> None:
         _check_choice("loop.prototype_features", self.prototype_features, {"train_view0", "test_transform"})
-        if self.num_workers < 0 or self.eval_every < 0 or self.keep_checkpoint_every < 0:
-            raise ValueError("loop.num_workers, loop.eval_every and loop.keep_checkpoint_every must be >= 0")
+        if min(self.num_workers, self.eval_every, self.keep_checkpoint_every, self.grad_monitor_every) < 0:
+            raise ValueError("loop.num_workers, eval_every, keep_checkpoint_every and grad_monitor_every must be >= 0")
         if self.max_steps_per_epoch is not None and self.max_steps_per_epoch < 1:
             raise ValueError("loop.max_steps_per_epoch must be >= 1 or None")
 

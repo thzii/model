@@ -61,6 +61,8 @@ def build_config(args: argparse.Namespace) -> PlanoraSFConfig:
         cfg.loop.diagnostics = args.diagnostics
     if args.keep_checkpoint_every is not None:
         cfg.loop.keep_checkpoint_every = args.keep_checkpoint_every
+    if args.grad_monitor_every is not None:
+        cfg.loop.grad_monitor_every = args.grad_monitor_every
     return cfg.set_components(fourex=args.use_fourex, debgcd=args.use_debgcd, hypcd=args.use_hypcd)
 
 
@@ -85,6 +87,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         help="per-epoch PL-acc L0 and routing (default: loop.diagnostics)")
     parser.add_argument("--keep-checkpoint-every", type=int, default=None,
                         help="also keep epoch_XXX.pt every n epochs (default: loop.keep_checkpoint_every)")
+    parser.add_argument("--grad-monitor-every", type=int, default=None,
+                        help="per-loss gradient cosines on the trainable blocks every n steps; 0 = off (Task #5)")
     parser.add_argument("--use-fourex", "--use_four_ex", dest="use_fourex", action=argparse.BooleanOptionalAction,
                         default=None, help="FourEx losses and L_cls head on/off (off = E0/E2)")
     parser.add_argument("--use-debgcd", "--use_debgcd", dest="use_debgcd", action=argparse.BooleanOptionalAction,

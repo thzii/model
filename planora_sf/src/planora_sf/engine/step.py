@@ -154,6 +154,8 @@ def compute_losses(
 
     losses = combine_losses(base, low, high, cls, cfg.weights)
     losses.stats.update(hyp_stats)
+    if cfg.hypcd.enabled:
+        losses.parts.update(hyp_dist=dist_terms[0], hyp_ang=ang_terms[0])
     if cfg.debgcd.enabled:
         losses = _add_debgcd(model, torch.cat([c1, c2]), batch, pseudo, cfg, losses)
     return losses, views

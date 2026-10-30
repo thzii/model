@@ -19,6 +19,10 @@ class LossBreakdown:
     sdl: Optional[torch.Tensor] = None  # DebGCD Eq. 6, only when debgcd.enabled
     adl: Optional[torch.Tensor] = None  # DebGCD Eq. 13, only when debgcd.enabled
     stats: dict[str, float] = field(default_factory=dict)  # non-loss per-step monitors
+    # Loss groups with their graphs, for the gradient monitor (engine/grad_monitor.py); never reported.
+    # "base" + "fourier" + "debias" sum to ``total``; "hyp_dist"/"hyp_ang" are base's two HypCD branches
+    # before α_d weighting.
+    parts: dict[str, torch.Tensor] = field(default_factory=dict, repr=False)
 
     def as_floats(self) -> dict[str, float]:
         names = ["total", "base", "low", "high", "cls"] + [n for n in ("sdl", "adl") if getattr(self, n) is not None]
@@ -28,14 +32,18 @@ class LossBreakdown:
 def combine_losses(
     base: torch.Tensor, low: torch.Tensor, high: torch.Tensor, cls: torch.Tensor, weights: LossWeights
 ) -> LossBreakdown:
-    total = base + weights.low * low + weights.high * high + weights.cls * cls
-    return LossBreakdown(total=total, base=base, low=low, high=high, cls=cls)
+    total = base + weights.low * low + weights.high * high + weights.cls * cls  # summation order kept: goldens
+    parts = {"base": base}
+    if max(weights.low, weights.high, weights.cls) > 0:
+        parts["fourier"] = weights.low * low + weights.high * high + weights.cls * cls
+    return LossBreakdown(total=total, base=base, low=low, high=high, cls=cls, parts=parts)
 
 
 def add_debgcd(losses: LossBreakdown, sdl: torch.Tensor, adl: torch.Tensor, lam_sdl: float, lam_adl: float,
                stats: Optional[dict[str, float]] = None) -> LossBreakdown:
     """L_all = L_total + λ_sdl L_sdl + λ_adl L_adl (DebGCD Eq. 14, with L_gcd replaced by PLANORA-SF's L_total)."""
+    parts = {**losses.parts, **({"debias": lam_sdl * sdl + lam_adl * adl} if max(lam_sdl, lam_adl) > 0 else {})}
     return LossBreakdown(
         total=losses.total + lam_sdl * sdl + lam_adl * adl, base=losses.base, low=losses.low, high=losses.high,
-        cls=losses.cls, sdl=sdl, adl=adl, stats={**losses.stats, **(stats or {})},
+        cls=losses.cls, sdl=sdl, adl=adl, stats={**losses.stats, **(stats or {})}, parts=parts,
     )

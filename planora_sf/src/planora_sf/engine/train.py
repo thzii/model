@@ -25,6 +25,7 @@ from planora_sf.data.gcd_dataset import GCDTrainDataset
 from planora_sf.data.sampler import build_gcd_sampler
 from planora_sf.debgcd.surrogate import align_novel_clusters, permute_level
 from planora_sf.engine.diagnostics import pseudo_label_quality
+from planora_sf.engine.grad_monitor import GradientMonitor
 from planora_sf.engine.optim import build_optimizer, build_scheduler
 from planora_sf.engine.step import TrainBatch, compute_losses, refresh_pseudo_labels
 from planora_sf.eval.metrics import AccuracyReport
@@ -103,10 +104,13 @@ def train_one_epoch(
     max_steps: Optional[int] = None,
     generator: Optional[torch.Generator] = None,
     epoch: Optional[int] = None,
+    diagnostics: Optional[dict[str, Any]] = None,
 ) -> tuple[int, dict[str, float]]:
     """Phase B over one pass of ``loader``. Returns ``(steps, mean losses and monitors)``.
 
     HypCD needs the 0-based ``epoch`` for α_d (the schedule spans ``cfg.optim.epochs``).
+    With ``loop.grad_monitor_every`` > 0 and a ``diagnostics`` dict, every n-th step's per-loss
+    gradients are measured (engine/grad_monitor.py) and summarised in ``diagnostics["grad"]``.
 
     Training targets come from ``dataset.train_targets``, so unlabelled
     ground truth (which the dataset also yields for evaluation) is never used.
@@ -119,6 +123,9 @@ def train_one_epoch(
             raise ValueError("HypCD needs the epoch index for its α_d schedule")
         hyp_alpha = cfg.hypcd.alpha(epoch, cfg.optim.epochs)
     model.train()
+    monitor = None
+    if diagnostics is not None and cfg.loop.grad_monitor_every:
+        monitor = GradientMonitor(model.backbone, cfg.loop.grad_monitor_every)
     totals: dict[str, float] = defaultdict(float)
     steps = 0
     for views, _, is_labelled, index in loader:
@@ -135,12 +142,16 @@ def train_one_epoch(
         )
         if not torch.isfinite(losses.total):
             raise FloatingPointError(f"non-finite loss at step {steps}: {losses.as_floats()}")
+        if monitor is not None and monitor.due(steps):
+            monitor.observe(losses.parts)  # autograd.grad: .grad untouched, no RNG draws
         optimizer.zero_grad(set_to_none=True)
         losses.total.backward()
         optimizer.step()
         for name, value in losses.as_floats().items():
             totals[name] += value
         steps += 1
+    if monitor is not None:
+        diagnostics["grad"] = monitor.summary()
     return steps, {name: value / steps for name, value in totals.items()} if steps else {}
 
 
@@ -214,6 +225,7 @@ def fit(
         steps, losses = train_one_epoch(  # phase B
             model, fourier, loader, state, optimizer, cfg,
             device=device, max_steps=cfg.loop.max_steps_per_epoch, generator=generator, epoch=epoch,
+            diagnostics=diagnostics,
         )
         scheduler.step()
         stats = EpochStats(epoch, steps, losses, lr, state.num_levels, time.perf_counter() - start, diagnostics)

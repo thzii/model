@@ -116,3 +116,4 @@ loop:
   crop_pct: 0.875             # ct.py:712
   keep_checkpoint_every: 0    # also save epoch_XXX.pt every n epochs; 0 = off
   diagnostics: false          # per-epoch PL-acc L0 + routing (master plan Task #2b)
+  grad_monitor_every: 0       # per-loss gradient cosines every n steps (Task #5); 0 = off
