@@ -8,7 +8,7 @@ This is an isolated research package for the PLANORA-SF method: SelEx + FourEx f
 
 ```bash
 cd research/planora_sf
-pip install -r requirements-research.txt   # torch, numpy, scipy, PyYAML, pytest
+pip install -r requirements.txt   # torch, numpy, scipy, PyYAML, pytest
 python -m pytest
 ```
 
