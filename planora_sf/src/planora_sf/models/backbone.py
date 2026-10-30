@@ -14,11 +14,20 @@ from torch import nn
 from planora_sf.config import BackboneConfig
 from planora_sf.models.tiny_vit import TinyViT
 
-# torch.hub entry points for the backbones named in FX-P §5.1. Loading them needs
-# network access (or a populated hub cache) and is not exercised by the unit tests.
+# torch.hub entry points for the backbones named in FX-P §5.1, pinned to the commits that were the
+# head of each repo's main branch on 2026-10-30 (master plan Task #4). The code at a pinned commit
+# cannot change; the weights are fixed files on dl.fbaipublicfiles.com. Loading needs network
+# access (or a populated hub cache) and is only exercised by the opt-in tests.
 HUB_ENTRYPOINTS: dict[str, tuple[str, str]] = {
-    "dinov1_vitb16": ("facebookresearch/dino:main", "dino_vitb16"),
-    "dinov2_vitb14_reg": ("facebookresearch/dinov2", "dinov2_vitb14_reg"),
+    "dinov1_vitb16": ("facebookresearch/dino:7c446df5b9f45747937fb0d72314eb9f7b66930a", "dino_vitb16"),
+    "dinov2_vitb14_reg": ("facebookresearch/dinov2:7764ea0f912e53c92e82eb78a2a1631e92725fc8", "dinov2_vitb14_reg"),
+}
+
+# What each hub model must look like for BackboneAdapter: a flat ModuleList of blocks (DINOv2's hub
+# models use block_chunks=0), the CLS width, the patch size and the register tokens.
+HUB_STRUCTURE: dict[str, dict[str, int]] = {
+    "dinov1_vitb16": {"num_blocks": 12, "embed_dim": 768, "patch_size": 16, "num_register_tokens": 0},
+    "dinov2_vitb14_reg": {"num_blocks": 12, "embed_dim": 768, "patch_size": 14, "num_register_tokens": 4},
 }
 
 
@@ -172,6 +181,39 @@ def load_foreign_backbone(vit: nn.Module, obj: Any) -> dict[str, Any]:
     return report
 
 
+def _patch_size(vit: nn.Module) -> Optional[int]:
+    size = getattr(getattr(vit, "patch_embed", None), "patch_size", None)
+    if isinstance(size, (tuple, list)):
+        size = size[0]
+    return int(size) if size is not None else None
+
+
+def check_hub_structure(vit: nn.Module, name: str, image_size: int) -> None:
+    """Refuse a hub model whose structure differs from ``HUB_STRUCTURE[name]`` or whose output is not [B, F]."""
+    expected = HUB_STRUCTURE[name]
+    blocks = getattr(vit, "blocks", None)
+    found = {
+        "num_blocks": len(blocks) if isinstance(blocks, nn.ModuleList) and not getattr(vit, "chunked_blocks", False)
+        else None,
+        "embed_dim": getattr(vit, "embed_dim", None),
+        "patch_size": _patch_size(vit),
+        "num_register_tokens": int(getattr(vit, "num_register_tokens", 0) or 0),
+    }
+    wrong = {k: (found[k], v) for k, v in expected.items() if found[k] != v}
+    if wrong:
+        raise ValueError(f"{name}: unexpected hub model structure (found, expected): {wrong}")
+    if image_size % expected["patch_size"]:
+        raise ValueError(f"{name}: image_size {image_size} is not a multiple of the patch size {expected['patch_size']}")
+    param = next(vit.parameters())
+    was_training = vit.training
+    vit.eval()
+    with torch.no_grad():
+        out = vit(torch.zeros(1, 3, image_size, image_size, device=param.device, dtype=param.dtype))
+    vit.train(was_training)
+    if tuple(out.shape) != (1, expected["embed_dim"]):
+        raise ValueError(f"{name}: expected CLS output [1, {expected['embed_dim']}], got {tuple(out.shape)}")
+
+
 def build_backbone(
     cfg: BackboneConfig,
     *,
@@ -189,10 +231,13 @@ def build_backbone(
         vit = TinyViT(img_size=cfg.image_size, **(tiny_kwargs or {}))
     else:
         repo, entry = HUB_ENTRYPOINTS[cfg.name]
-        vit = torch.hub.load(repo, entry, pretrained=pretrained and checkpoint_path is None)
+        # skip_validation: torch.hub only validates refs that head a branch or tag; the commit is pinned.
+        vit = torch.hub.load(repo, entry, pretrained=pretrained and checkpoint_path is None,
+                             trust_repo=True, skip_validation=True)
         if checkpoint_path is not None:
             state = torch.load(checkpoint_path, map_location="cpu")
             vit.load_state_dict(strip_dino_checkpoint(state))
+        check_hub_structure(vit, cfg.name, cfg.image_size)
     adapter = BackboneAdapter(vit, probe_image_size=cfg.image_size)
     adapter.freeze(cfg.grad_from_block, train_final_norm=cfg.train_final_norm)
     return adapter

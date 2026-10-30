@@ -13,6 +13,7 @@ Experiment rows (plan §4.2) on top of the chosen config:
     E2 SelEx+DebGCD    --no-use-fourex --use-debgcd
     E3 all three       --use-fourex --use-debgcd
     E4 Hyp-SelEx       --no-use-fourex --use-hypcd
+DINOv2 instead of DINOv1: --backbone dinov2_vitb14_reg (or configs/dinov2/*.yaml).
 Without a flag, a component stays as the config sets it.
 
 With ``--checkpoint-dir`` the run writes ``last.pt`` and ``summary.json`` there, both with a
@@ -46,6 +47,8 @@ def build_config(args: argparse.Namespace) -> PlanoraSFConfig:
         cfg = PlanoraSFConfig.for_dataset(args.dataset)
     else:  # synthetic smoke run: tiny ViT, small latent space
         cfg = smoke_config()
+    if args.backbone is not None:
+        cfg.backbone.name = args.backbone
     if args.cutoff is not None:
         cfg.fourier.cutoff = args.cutoff
     if args.batch_size is not None:
@@ -72,6 +75,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--num-workers", type=int, default=None)
     parser.add_argument("--cutoff", type=int, default=None, help="Fourier cut-off T (default: Table 7 / config)")
+    parser.add_argument("--backbone", choices=["dinov1_vitb16", "dinov2_vitb14_reg"], default=None,
+                        help="default: backbone.name of the config (DINOv1 for the reference configs)")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--checkpoint-dir", type=Path, default=None)
     parser.add_argument("--seed", type=int, default=1)
@@ -89,6 +94,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
     args.dataset = canonical_dataset(args.dataset)
     args.root = args.root or default_root(args.dataset)
+    if args.backbone is not None and args.dataset == "dummy" and args.config is None:
+        parser.error("--backbone needs a benchmark dataset or --config (the dummy smoke run uses the tiny ViT)")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     torch.manual_seed(args.seed)

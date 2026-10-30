@@ -18,7 +18,7 @@ by eval seed in cli.compare_evals):
     python -m planora_sf.cli.evaluate --dataset scars --checkpoint runs/x/last.pt --eval-seeds 0,1,2,3,4 \
         --crop-bbox --crop-margin 0.1 --crop-shape square --out runs/s3/x_crop.json
 
-Frozen-backbone floor (pretrained DINO, no training):
+Frozen-backbone floor (pretrained DINO, no training; --backbone dinov2_vitb14_reg for DINOv2):
     python -m planora_sf.cli.evaluate --dataset cub --root /data/cub --device cuda --frozen-backbone
 
 ``--root`` defaults to ``$CUB_ROOT`` (CUB) or ``$SCARS_ROOT`` (Stanford Cars). The output is strict
@@ -87,9 +87,12 @@ def parse_logged(text: str) -> dict[str, float]:
     return dict(zip(("all", "known", "novel"), values))
 
 
-def reference_config(dataset: str) -> PlanoraSFConfig:
+def reference_config(dataset: str, backbone: Optional[str] = None) -> PlanoraSFConfig:
     """Config for weights without one of their own (frozen or foreign backbones)."""
-    return smoke_config() if dataset == "dummy" else PlanoraSFConfig.for_dataset(dataset)
+    cfg = smoke_config() if dataset == "dummy" else PlanoraSFConfig.for_dataset(dataset)
+    if backbone is not None:
+        cfg.backbone.name = backbone
+    return cfg
 
 
 def link_check(logged: Mapping[str, float], summary: Mapping[str, Any]) -> dict[str, Any]:
@@ -152,6 +155,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="ViT weights saved by other code (SelEx/DebGCD/HypCD); evaluated with the reference config")
     parser.add_argument("--unsafe-load", action="store_true",
                         help="--foreign-backbone only: allow arbitrary pickled objects (only for files you trust)")
+    parser.add_argument("--backbone", choices=["dinov1_vitb16", "dinov2_vitb14_reg"], default=None,
+                        help="frozen/foreign weights: which ViT (default DINOv1); a checkpoint names its own")
     parser.add_argument("--dataset", choices=["cub", "scars", "stanford_cars", "dummy"], default="cub")
     parser.add_argument("--root", default=None, help="dataset root; default: $CUB_ROOT or $SCARS_ROOT")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -208,8 +213,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         cfg = PlanoraSFConfig.from_dict(ckpt["config"])
         if cfg.dataset is not None and cfg.dataset != args.dataset:
             parser.error(f"checkpoint was configured for dataset {cfg.dataset!r} but --dataset is {args.dataset!r}")
+        if args.backbone is not None and args.backbone != cfg.backbone.name:
+            parser.error(f"checkpoint uses backbone {cfg.backbone.name!r} but --backbone is {args.backbone!r}")
     else:
-        cfg = reference_config(args.dataset)
+        if args.backbone is not None and args.dataset == "dummy":
+            parser.error("--backbone needs a benchmark dataset (the dummy data uses the tiny ViT)")
+        cfg = reference_config(args.dataset, args.backbone)
 
     # Rebuild data exactly as cli.train does; cropping changes pixels only, never the split.
     crop = CropSpec(args.crop_margin, args.crop_shape) if args.crop_bbox else None

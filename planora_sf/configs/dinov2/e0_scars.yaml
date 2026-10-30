@@ -1,0 +1,111 @@
+# S4-v2-E0 (master plan Step 4b, Gate 4): pure SelEx (E0) on Stanford Cars with DINOv2 ViT-B/14 + registers.
+# Differs from PlanoraSFConfig.for_dataset("scars") only in backbone.name and the E0 toggles (FourEx weights 0,
+# no L_cls head; the 4-view forward is kept, as in E0). tests/test_dinov2.py checks that.
+# Hub code pinned in models/backbone.py (facebookresearch/dinov2 @ 7764ea0); 224 px = 16 x 16 patches of 14.
+# Open items, kept at the DINOv1 values until a source is fixed (master plan §2.2):
+#   backbone.grad_from_block 9 (last 3 blocks) and selex.smoothing_alpha 1.0 (SelEx README, Cars).
+# Provisional target: v2 All >= 79 (Gate 4); ">80%" needs v2 All >= 80 on each of 3 seeds.
+# The SelEx DINOv2 Cars reference is 82.2 as quoted by FourEx but 92.6 in the SelEx paper: confirm before claiming.
+# Every key is explicit: from_yaml applies this file over the generic defaults.
+
+selex_compat: true
+base: selex
+dataset: scars
+backbone:
+  name: dinov2_vitb14_reg
+  grad_from_block: 9
+  train_final_norm: false
+  image_size: 224
+head:
+  hidden_dim: 2048
+  bottleneck_dim: 256
+  num_layers: 3
+latent:
+  dim: 65536
+  fraction_of_half: true
+  high_fraction_mode: one_minus
+  renormalize_slices: false
+fourier:
+  snr_target_db: 15.0
+  cutoff: 27
+  cutoff_high: null
+  blur_kernel_size: 5
+  blur_sigma: 1.1
+  blur_anchor: false
+  strict_inequality: true
+  band_pass: false
+  per_image_cutoffs: true
+  low_cutoff_min: 1
+  high_cutoff_min: 0
+  filtered_view: x1
+  extra_views: true
+  snr_metric: box
+selex:
+  lam: 0.35
+  smoothing_alpha: 1.0
+  tau_unsup: 1.0
+  tau_sup: 0.07
+  similarity: neg_euclidean
+  use_loss: soft_ce
+  target_mode: null
+  balanced: true
+  kmeans_max_iter: 10
+  kmeans_n_init: 1
+  reproduce_label_order_bug: false
+weights:
+  low: 0.0
+  high: 0.0
+  cls: 0.0
+cls_head:
+  enabled: false
+  input: cls
+  loss: sigmoid_bce
+  num_classes: null
+debgcd:
+  enabled: false
+  lam_sdl: 0.01
+  lam_adl: 1.0
+  threshold: 0.85
+  tau_a: 0.1
+  tau_ova: 0.1
+  tau_p: 0.1
+  detector_layers: 5
+  detector_hidden_dim: 2048
+  detector_bottleneck_dim: 256
+  consistency_filter: true
+  align_clusters: true
+hypcd:
+  enabled: false
+  curvature: 0.05
+  clip_r: 2.3
+  alpha_max: 1.0
+  alpha_epoch_offset: 0
+  angle_similarity: cosine
+  project_eps: 0.001
+optim:
+  lr: 0.1
+  momentum: 0.9
+  weight_decay: 5.0e-05
+  epochs: 200
+  eta_min_factor: 0.001
+  batch_size: 128
+eval:
+  clustering: bssk
+  n_init: 10
+  max_iter: 10
+  metric: v2
+  seed: 0
+data:
+  known_class_fraction: 0.5
+  labelled_fraction: 0.5
+  split_seed: 0
+  stratified: false
+  use_ssb_splits: true
+loop:
+  num_workers: 4
+  prototype_features: train_view0
+  eval_every: 0
+  max_steps_per_epoch: null
+  crop_pct: 0.875
+  keep_checkpoint_every: 0
+  diagnostics: false
