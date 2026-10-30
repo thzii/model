@@ -1,0 +1,111 @@
+# E4-port (Stanford Cars): Hyp-SelEx reproduction with the UPSTREAM settings (docs/hypcd_port.md, rows).
+# Source: Visual-AI/HypCD @ ffc895b, scripts/train_HypSelEx.cmd line 14
+#   ("sbatch scripts/train_HypSelEx.cmd scars v1 0.5 1.0 0.1 2.0"): --grad_from_block 10, --mlp_out_dim 8192, --c 0.1, --cr 2.0,
+#   --unsupervised_smoothing 0.5, --hyper_max_weight 1.0, batch 128, lr 0.1, wd 5e-5, 200 epochs,
+#   --sup_con_weight 0.35, --temperature 1.0 (USE), SupCon 0.07; train_HypSelEx.py:361 alpha (e+1)/200 (H-06);
+#   angle branch = -cdist on ball points (H-01).
+# Target (HypCD Table 1, DINOv1, v2 All/Old/New): 62.9 / 80.0 / 54.7; the paper says 3 trainable blocks for Cars, the script 2 (H-05). Gate G4: All within +-3.
+# Not reproduced: upstream sampler weights (H-08) and best-on-test checkpoint selection (H-09).
+# Evaluator: ours (BSSK 10 inits x 10 iterations on l2 CLS), the same for every row (plan C10).
+# FourEx and DebGCD are off; the 4-view forward is kept, as in E0.
+# Every key is explicit: from_yaml applies this file over the generic defaults.
+
+selex_compat: true
+base: selex
+dataset: scars
+backbone:
+  name: dinov1_vitb16
+  grad_from_block: 10
+  train_final_norm: false
+  image_size: 224
+head:
+  hidden_dim: 2048
+  bottleneck_dim: 256
+  num_layers: 3
+latent:
+  dim: 8192
+  fraction_of_half: true
+  high_fraction_mode: one_minus
+  renormalize_slices: false
+fourier:
+  snr_target_db: 15.0
+  cutoff: 27
+  cutoff_high: null
+  blur_kernel_size: 5
+  blur_sigma: 1.1
+  blur_anchor: false
+  strict_inequality: true
+  band_pass: false
+  per_image_cutoffs: true
+  low_cutoff_min: 1
+  high_cutoff_min: 0
+  filtered_view: x1
+  extra_views: true
+  snr_metric: box
+selex:
+  lam: 0.35
+  smoothing_alpha: 0.5
+  tau_unsup: 1.0
+  tau_sup: 0.07
+  similarity: neg_euclidean
+  use_loss: soft_ce
+  target_mode: null
+  balanced: true
+  kmeans_max_iter: 10
+  kmeans_n_init: 1
+  reproduce_label_order_bug: true
+weights:
+  low: 0.0
+  high: 0.0
+  cls: 0.0
+cls_head:
+  enabled: false
+  input: cls
+  loss: sigmoid_bce
+  num_classes: null
+debgcd:
+  enabled: false
+  lam_sdl: 0.01
+  lam_adl: 1.0
+  threshold: 0.85
+  tau_a: 0.1
+  tau_ova: 0.1
+  tau_p: 0.1
+  detector_layers: 5
+  detector_hidden_dim: 2048
+  detector_bottleneck_dim: 256
+  consistency_filter: true
+  align_clusters: true
+hypcd:
+  enabled: true
+  curvature: 0.1
+  clip_r: 2.0
+  alpha_max: 1.0
+  alpha_epoch_offset: 1
+  angle_similarity: neg_euclidean
+  project_eps: 0.001
+optim:
+  lr: 0.1
+  momentum: 0.9
+  weight_decay: 5.0e-05
+  epochs: 200
+  eta_min_factor: 0.001
+  batch_size: 128
+eval:
+  clustering: bssk
+  n_init: 10
+  max_iter: 10
+  metric: v2
+  seed: 0
+data:
+  known_class_fraction: 0.5
+  labelled_fraction: 0.5
+  split_seed: 0
+  stratified: false
+  use_ssb_splits: true
+loop:
+  num_workers: 4
+  prototype_features: train_view0
+  eval_every: 0
+  max_steps_per_epoch: null
+  crop_pct: 0.875

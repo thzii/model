@@ -112,6 +112,7 @@ These are written into each epoch's history; none read labels:
 | E4 | E0-D8k + HypCD, paper defaults | New |
 | Cars E4-port | Upstream script, smoothing 0.5 | 62.9 / 80.0 / 54.7 |
 
+- The E4-port rows are locked in `configs/hypcd/e4_port_cub.yaml` and `configs/hypcd/e4_port_scars.yaml`. `tests/test_port_configs.py` checks that they differ from `for_dataset()` in exactly the upstream keys. They also reproduce upstream's D-08 label order (H-10). Run one with `cli.train --config configs/hypcd/e4_port_cub.yaml --dataset cub`.
 - `components()` names E4 only for SelEx + HypCD with FourEx and DebGCD off.
 - HypCD + FourEx and HypCD + DebGCD run, but have no row. They are composed configurations (plan D3), kept out of the matrix until G4 passes.
 - On Cars, every published method has Known − Novel between +25 and +30, so Cars gates check All ± 3 only.
