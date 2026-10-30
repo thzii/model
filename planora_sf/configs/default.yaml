@@ -114,3 +114,5 @@ loop:
   eval_every: 0               # 0 = evaluate only after the last epoch
   max_steps_per_epoch: null   # dry runs only
   crop_pct: 0.875             # ct.py:712
+  keep_checkpoint_every: 0    # also save epoch_XXX.pt every n epochs; 0 = off
+  diagnostics: false          # per-epoch PL-acc L0 + routing (master plan Task #2b)

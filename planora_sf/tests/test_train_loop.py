@@ -107,7 +107,7 @@ def test_fit_alternates_refresh_and_training(monkeypatch, generator, tmp_path):
         assert all(0.0 <= getattr(report, k) <= 1.0 for k in ("all", "known", "novel"))
 
     checkpoint = torch.load(tmp_path / "last.pt", weights_only=False)
-    assert checkpoint["epoch"] == 1 and set(checkpoint) == {"epoch", "model", "optimizer", "scheduler", "config"}
+    assert checkpoint["epoch"] == 1 and set(checkpoint) == {"epoch", "model", "optimizer", "scheduler", "config", "provenance"}
 
 
 def test_eval_every_and_test_transform_prototypes(generator):

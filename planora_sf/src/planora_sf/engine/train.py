@@ -14,7 +14,7 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Mapping, Optional, Union
 
 import torch
 from torch.utils.data import DataLoader
@@ -24,6 +24,7 @@ from planora_sf.data.factory import GCDDatasets
 from planora_sf.data.gcd_dataset import GCDTrainDataset
 from planora_sf.data.sampler import build_gcd_sampler
 from planora_sf.debgcd.surrogate import align_novel_clusters, permute_level
+from planora_sf.engine.diagnostics import pseudo_label_quality
 from planora_sf.engine.optim import build_optimizer, build_scheduler
 from planora_sf.engine.step import TrainBatch, compute_losses, refresh_pseudo_labels
 from planora_sf.eval.metrics import AccuracyReport
@@ -43,6 +44,7 @@ class EpochStats:
     lr: float  # learning rate used during this epoch
     num_levels: int  # pseudo-label hierarchy depth
     seconds: float
+    diagnostics: dict[str, Any] = field(default_factory=dict)  # loop.diagnostics / gradient monitor
 
 
 @dataclass
@@ -142,7 +144,10 @@ def train_one_epoch(
     return steps, {name: value / steps for name, value in totals.items()} if steps else {}
 
 
-def save_checkpoint(path: Path, model, optimizer, scheduler, epoch: int, cfg: PlanoraSFConfig) -> None:
+def save_checkpoint(
+    path: Path, model, optimizer, scheduler, epoch: int, cfg: PlanoraSFConfig,
+    provenance: Optional[Mapping[str, Any]] = None,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
@@ -151,6 +156,7 @@ def save_checkpoint(path: Path, model, optimizer, scheduler, epoch: int, cfg: Pl
             "optimizer": optimizer.state_dict(),
             "scheduler": scheduler.state_dict(),
             "config": cfg.to_dict(),
+            "provenance": dict(provenance or {}),
         },
         path,
     )
@@ -165,12 +171,15 @@ def fit(
     epochs: Optional[int] = None,
     checkpoint_dir: Optional[Union[str, Path]] = None,
     generator: Optional[torch.Generator] = None,
+    provenance: Optional[Mapping[str, Any]] = None,
 ) -> FitResult:
     """Run ``epochs`` (default ``cfg.optim.epochs``) of alternating optimisation.
 
     The LR schedule always spans ``cfg.optim.epochs``, so a shorter dry run ends
-    mid-schedule. Only the last checkpoint is saved: selecting the best one on
-    test labels (D-12) is deliberately not done (U-28).
+    mid-schedule. ``last.pt`` is overwritten every epoch; ``loop.keep_checkpoint_every``
+    also keeps ``epoch_XXX.pt`` copies for offline learning curves. Selecting the best
+    checkpoint on test labels (D-12) is deliberately not done (U-28). ``provenance``
+    (seed, commit, hashes; see ``engine.provenance``) is stored in every checkpoint.
     """
     device = torch.device(device)
     model.to(device)
@@ -198,13 +207,16 @@ def fit(
         if cfg.debgcd.enabled:
             state = align_to_previous(state, previous if cfg.debgcd.align_clusters else None, train.split.num_known)
             previous = state
+        diagnostics: dict[str, Any] = {}
+        if cfg.loop.diagnostics:  # reads unlabelled ground truth; returns numbers only, no RNG draws
+            diagnostics["pseudo_labels"] = pseudo_label_quality(state, train)
         lr = optimizer.param_groups[0]["lr"]
         steps, losses = train_one_epoch(  # phase B
             model, fourier, loader, state, optimizer, cfg,
             device=device, max_steps=cfg.loop.max_steps_per_epoch, generator=generator, epoch=epoch,
         )
         scheduler.step()
-        stats = EpochStats(epoch, steps, losses, lr, state.num_levels, time.perf_counter() - start)
+        stats = EpochStats(epoch, steps, losses, lr, state.num_levels, time.perf_counter() - start, diagnostics)
         result.history.append(stats)
         result.state = state
         log.info("epoch %d: %d steps, lr %.5f, losses %s", epoch, steps, lr, losses)
@@ -218,5 +230,9 @@ def fit(
             result.evaluations.append((epoch, scores))
             log.info("epoch %d: Train ACC Unlabelled %s", epoch, scores[cfg.eval.metric])
         if checkpoint_dir is not None:
-            save_checkpoint(Path(checkpoint_dir) / "last.pt", model, optimizer, scheduler, epoch, cfg)
+            args = (model, optimizer, scheduler, epoch, cfg, provenance)
+            save_checkpoint(Path(checkpoint_dir) / "last.pt", *args)
+            keep = cfg.loop.keep_checkpoint_every
+            if keep and (epoch + 1) % keep == 0:
+                save_checkpoint(Path(checkpoint_dir) / f"epoch_{epoch:03d}.pt", *args)
     return result

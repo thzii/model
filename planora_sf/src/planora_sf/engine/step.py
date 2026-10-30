@@ -14,6 +14,7 @@ import torch
 from planora_sf.config import PlanoraSFConfig
 from planora_sf.debgcd.losses import debgcd_terms
 from planora_sf.debgcd.surrogate import centroid_posterior
+from planora_sf.engine.diagnostics import hyperbolic_radius_stats
 from planora_sf.fourier.views import FourierViewGenerator, FourierViews
 from planora_sf.latent.partition import high_width, low_width
 from planora_sf.losses.contrastive import ContrastiveSettings, NegPoincare
@@ -136,15 +137,12 @@ def compute_losses(
         dist_terms = contrastive_terms(dataclasses.replace(settings, similarity=NegPoincare(hyp.curvature)))
         ang_terms = contrastive_terms(dataclasses.replace(settings, similarity=hyp.angle_similarity))
         base, low, high = (hyp_alpha * d + (1.0 - hyp_alpha) * a for d, a in zip(dist_terms, ang_terms))
-        with torch.no_grad():
-            tangent_norm = out.z_tangent.norm(dim=1)
-            hyp_stats = {
-                "hyp_alpha": float(hyp_alpha),
-                "hyp_clip_fraction": float((tangent_norm > hyp.clip_r).float().mean()),
-                "hyp_tangent_norm": float(tangent_norm.mean()),
-                "hyp_base_dist": float(dist_terms[0]),
-                "hyp_base_ang": float(ang_terms[0]),
-            }
+        hyp_stats = {
+            "hyp_alpha": float(hyp_alpha),
+            **hyperbolic_radius_stats(out.z_tangent, out.z, hyp.curvature, hyp.clip_r),
+            "hyp_base_dist": float(dist_terms[0].detach()),
+            "hyp_base_ang": float(ang_terms[0].detach()),
+        }
     else:
         base, low, high = contrastive_terms(settings)
 

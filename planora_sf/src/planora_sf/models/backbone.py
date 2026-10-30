@@ -22,6 +22,14 @@ HUB_ENTRYPOINTS: dict[str, tuple[str, str]] = {
 }
 
 
+def hub_source(name: str) -> Optional[str]:
+    """``"repo:ref/entry"`` of a hub backbone, for run provenance; ``None`` for the tiny test ViT."""
+    if name not in HUB_ENTRYPOINTS:
+        return None
+    repo, entry = HUB_ENTRYPOINTS[name]
+    return f"{repo}/{entry}"
+
+
 def infer_feature_dim(vit: nn.Module, probe_image_size: Optional[int] = None) -> int:
     for attr in ("embed_dim", "num_features"):
         value = getattr(vit, attr, None)

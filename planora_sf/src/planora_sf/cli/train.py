@@ -14,6 +14,10 @@ Experiment rows (plan §4.2) on top of the chosen config:
     E3 all three       --use-fourex --use-debgcd
     E4 Hyp-SelEx       --no-use-fourex --use-hypcd
 Without a flag, a component stays as the config sets it.
+
+With ``--checkpoint-dir`` the run writes ``last.pt`` and ``summary.json`` there, both with a
+provenance block (seed, commit, config/split SHA-256; master plan Task #2b). ``--label`` names
+the run for ``cli.aggregate`` (e.g. S2-E0); it defaults to the experiment row.
 """
 from __future__ import annotations
 
@@ -27,8 +31,10 @@ from typing import Optional, Sequence
 
 import torch
 
+from planora_sf.cli.evaluate import json_safe
 from planora_sf.config import BackboneConfig, FourierConfig, HeadConfig, LatentConfig, PlanoraSFConfig
 from planora_sf.data.factory import build_gcd_datasets, build_sources, build_split, canonical_dataset, default_root
+from planora_sf.engine.provenance import run_provenance
 from planora_sf.engine.train import fit
 from planora_sf.models.model import build_model
 
@@ -54,6 +60,10 @@ def build_config(args: argparse.Namespace) -> PlanoraSFConfig:
         cfg.loop.max_steps_per_epoch = args.max_steps
     if args.num_workers is not None:
         cfg.loop.num_workers = args.num_workers
+    if args.diagnostics is not None:
+        cfg.loop.diagnostics = args.diagnostics
+    if args.keep_checkpoint_every is not None:
+        cfg.loop.keep_checkpoint_every = args.keep_checkpoint_every
     return cfg.set_components(fourex=args.use_fourex, debgcd=args.use_debgcd, hypcd=args.use_hypcd)
 
 
@@ -71,6 +81,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--checkpoint-dir", type=Path, default=None)
     parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--label", default=None, help="run name for cli.aggregate (default: the experiment row)")
+    parser.add_argument("--diagnostics", action=argparse.BooleanOptionalAction, default=None,
+                        help="per-epoch PL-acc L0 and routing (default: loop.diagnostics)")
+    parser.add_argument("--keep-checkpoint-every", type=int, default=None,
+                        help="also keep epoch_XXX.pt every n epochs (default: loop.keep_checkpoint_every)")
     parser.add_argument("--use-fourex", "--use_four_ex", dest="use_fourex", action=argparse.BooleanOptionalAction,
                         default=None, help="FourEx losses and L_cls head on/off (off = E0/E2)")
     parser.add_argument("--use-debgcd", "--use_debgcd", dest="use_debgcd", action=argparse.BooleanOptionalAction,
@@ -90,17 +105,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         train_source, test_source, split, image_size=cfg.backbone.image_size, crop_pct=cfg.loop.crop_pct
     )
     model = build_model(cfg, num_known_classes=split.num_known, num_classes=split.num_classes)
+    provenance = run_provenance(cfg, split, seed=args.seed, device=args.device)
     result = fit(
         model, datasets, cfg, device=args.device, epochs=args.epochs,
-        checkpoint_dir=args.checkpoint_dir, generator=torch.Generator().manual_seed(args.seed),
+        checkpoint_dir=args.checkpoint_dir, generator=torch.Generator().manual_seed(args.seed), provenance=provenance,
     )
+    components = cfg.components()
+    evaluations = [{"epoch": e, **{k: asdict(v) for k, v in s.items()}} for e, s in result.evaluations]
     summary = {
-        "components": cfg.components(),
+        "label": args.label or components["row"] or "custom",
+        "dataset": args.dataset,
+        "backbone": cfg.backbone.name,
+        "components": components,
+        "provenance": provenance,
+        "epochs_run": len(result.history),
         "split": split.summary(train_source.targets),
+        "final": evaluations[-1] if evaluations else None,
         "history": [asdict(h) for h in result.history],
-        "evaluations": [{"epoch": e, **{k: asdict(v) for k, v in s.items()}} for e, s in result.evaluations],
+        "evaluations": evaluations,
     }
-    print(json.dumps(summary, indent=2))
+    text = json.dumps(json_safe(summary), indent=2, allow_nan=False)
+    print(text)
+    if args.checkpoint_dir is not None:
+        args.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        (args.checkpoint_dir / "summary.json").write_text(text + "\n", encoding="utf-8")
     return 0
 
 

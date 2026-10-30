@@ -207,7 +207,9 @@ def audit_checkpoint(path: Path, *, unsafe: bool = False) -> dict[str, Any]:
         report["epoch"] = native.get("epoch")
         report["components"] = _components(config)
         report["has_optimizer_state"] = "optimizer" in native
-        report["provenance"] = {k: native.get(k) for k in ("seed", "commit", "config_sha256", "split_sha256")}
+        stored = native.get("provenance") if isinstance(native.get("provenance"), Mapping) else native
+        keys = ("seed", "commit", "commit_dirty", "config_sha256", "split_sha256", "hub")
+        report["provenance"] = {k: stored.get(k) for k in keys}  # all None before Task #2b checkpoints
         report["rescore"] = "cli.evaluate --checkpoint (native checkpoint)"
     else:
         report["rescore"] = "not directly: foreign weights need a key mapping (master plan Task #1/2a)"
