@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 from planora_sf.config import DataConfig
+from planora_sf.data.bbox import BBoxCropSource, CropSpec
 from planora_sf.data.gcd_dataset import GCDTestDataset, GCDTrainDataset
 from planora_sf.data.scars import StanfordCars
 from planora_sf.data.sources import CUB200, DummyGCDDataset, ImageSource
@@ -39,9 +40,24 @@ class GCDDatasets:
 
 
 def build_sources(
-    name: str, root: Optional[Union[str, Path]] = None, *, download: bool = False
+    name: str, root: Optional[Union[str, Path]] = None, *, download: bool = False, crop: Optional[CropSpec] = None
 ) -> tuple[ImageSource, Optional[ImageSource]]:
-    name = canonical_dataset(name)
+    """(train, test) image sources; ``crop`` wraps both in ``BBoxCropSource`` (evaluation only, Task #3)."""
+    train, test = _raw_sources(canonical_dataset(name), root, download=download)
+    if crop is None:
+        return train, test
+    if getattr(train, "bboxes", None) is None:
+        raise ValueError(f"dataset {name!r} has no bounding boxes (CUB needs bounding_boxes.txt)")
+    cropped = BBoxCropSource(train, crop)
+    if cropped.num_degenerate:
+        log.warning("%d degenerate bounding boxes: those images are used uncropped", cropped.num_degenerate)
+    test_cropped = BBoxCropSource(test, crop) if test is not None and getattr(test, "bboxes", None) is not None else None
+    return cropped, test_cropped
+
+
+def _raw_sources(
+    name: str, root: Optional[Union[str, Path]], *, download: bool
+) -> tuple[ImageSource, Optional[ImageSource]]:
     if name == "cub":
         if root is None:
             raise ValueError("the CUB dataset needs a root directory")

@@ -118,7 +118,11 @@ def _read_table(path: Path) -> dict[int, str]:
 
 
 class CUB200:
-    """CUB-200-2011 train or test split, in ``images.txt`` (img_id) order, with 0-based class ids."""
+    """CUB-200-2011 train or test split, in ``images.txt`` (img_id) order, with 0-based class ids.
+
+    ``bboxes`` holds ``bounding_boxes.txt`` (x, y, width, height) as (left, top, right, bottom),
+    or ``None`` when the file is absent.
+    """
 
     def __init__(self, root: Union[str, Path], *, train: bool = True, download: bool = False, check_files: bool = False):
         root = Path(root)
@@ -135,6 +139,11 @@ class CUB200:
         self.image_ids = np.array(ids, dtype=np.int64)
         self.paths = [images[i] for i in ids]
         self.targets = np.array([int(labels[i]) - 1 for i in ids], dtype=np.int64)
+        self.bboxes = None
+        if (self.base / "bounding_boxes.txt").is_file():
+            boxes = _read_table(self.base / "bounding_boxes.txt")
+            xywh = np.array([[float(v) for v in boxes[i].split()] for i in ids], dtype=np.float64).reshape(-1, 4)
+            self.bboxes = np.concatenate([xywh[:, :2], xywh[:, :2] + xywh[:, 2:]], axis=1)
         if check_files:
             missing = [p for p in self.paths if not (self.base / "images" / p).is_file()]
             if missing:

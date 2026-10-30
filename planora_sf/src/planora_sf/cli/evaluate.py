@@ -13,6 +13,11 @@ Offline pseudo-label accuracy (PL-acc L0: phase A's level-0 BSSK on train_view0 
 Foreign weights (official SelEx/DebGCD/HypCD code; only the ViT is used, heads are ignored):
     python -m planora_sf.cli.evaluate --dataset scars --foreign-backbone hypcd/model.pt --eval-seeds 0,1,2,3,4
 
+Bounding-box crop at evaluation time only (Task #3; same split, so it pairs with an uncropped run
+by eval seed in cli.compare_evals):
+    python -m planora_sf.cli.evaluate --dataset scars --checkpoint runs/x/last.pt --eval-seeds 0,1,2,3,4 \
+        --crop-bbox --crop-margin 0.1 --crop-shape square --out runs/s3/x_crop.json
+
 Frozen-backbone floor (pretrained DINO, no training):
     python -m planora_sf.cli.evaluate --dataset cub --root /data/cub --device cuda --frozen-backbone
 
@@ -35,6 +40,7 @@ import torch
 
 from planora_sf.cli.common import config_diff, file_sha256, flatten, json_safe, mean_std, smoke_config
 from planora_sf.config import PlanoraSFConfig
+from planora_sf.data.bbox import CropSpec
 from planora_sf.data.factory import build_gcd_datasets, build_sources, build_split, canonical_dataset, default_root
 from planora_sf.data.splits import SSB_FILES, ssb_novel_tiers
 from planora_sf.engine.diagnostics import pseudo_label_quality
@@ -158,6 +164,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pseudo-labels", action="store_true", help="also report PL-acc L0 per eval seed (Task #2a)")
     parser.add_argument("--logged-v2", type=parse_logged, default=None, metavar="ALL,KNOWN,NOVEL",
                         help="v2 the training log printed, in percent: checks the log <-> checkpoint link")
+    parser.add_argument("--crop-bbox", action="store_true", help="crop every image to its bounding box (Task #3)")
+    parser.add_argument("--crop-margin", type=float, default=0.1, help="margin per side, fraction of the box size")
+    parser.add_argument("--crop-shape", choices=["square", "tight"], default="square",
+                        help="square: grow the box to a square first (default); tight: the control")
     parser.add_argument("--out", type=Path, default=None, help="also write the JSON here")
     return parser
 
@@ -201,8 +211,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     else:
         cfg = reference_config(args.dataset)
 
-    # Rebuild data exactly as cli.train does.
-    train_source, test_source = build_sources(args.dataset, args.root)
+    # Rebuild data exactly as cli.train does; cropping changes pixels only, never the split.
+    crop = CropSpec(args.crop_margin, args.crop_shape) if args.crop_bbox else None
+    train_source, test_source = build_sources(args.dataset, args.root, crop=crop)
     split = build_split(args.dataset, train_source, cfg.data)
     model, record, stored = _load_model(args, cfg, ckpt, split)
     datasets = build_gcd_datasets(
@@ -241,6 +252,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "dataset": args.dataset,
         "backbone": cfg.backbone.name,
         "evaluator": {**dataclasses.asdict(eval_cfg), "eval_seeds": list(args.eval_seeds)},
+        "crop": None if crop is None else {**crop.to_dict(), "degenerate_boxes": train_source.num_degenerate},
         "config": cfg.to_dict(),
         "config_diff_vs_cub_reference": config_diff(cfg.to_dict(), PlanoraSFConfig.for_dataset("cub").to_dict()),
         "split": split.summary(train_source.targets),

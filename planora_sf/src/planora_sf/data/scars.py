@@ -68,7 +68,11 @@ def _image_dir(base: Path, name: str) -> Path:
     return nested if nested.is_dir() and not any(folder.glob("*.jpg")) else folder
 
 
-def _read_annotations(path: Path) -> tuple[list[str], np.ndarray]:
+def _read_annotations(path: Path) -> tuple[list[str], np.ndarray, Optional[np.ndarray]]:
+    """File names, 0-based classes and, if the file has them, boxes as 0-based (left, top, right, bottom).
+
+    The devkit's bbox_x1..bbox_y2 are MATLAB 1-based inclusive pixel indices (data/bbox.py).
+    """
     from scipy.io import loadmat
 
     annotations = np.atleast_1d(loadmat(str(path), squeeze_me=True)["annotations"])
@@ -77,7 +81,12 @@ def _read_annotations(path: Path) -> tuple[list[str], np.ndarray]:
         raise ValueError(f"{path} has no 'fname'/'class' annotation fields (found {names})")
     fnames = [str(a["fname"]) for a in annotations]
     classes = np.array([int(a["class"]) - 1 for a in annotations], dtype=np.int64)  # 1-based on disk
-    return fnames, classes
+    fields = ("bbox_x1", "bbox_y1", "bbox_x2", "bbox_y2")
+    bboxes = None
+    if all(f in names for f in fields):
+        raw = np.array([[float(a[f]) for f in fields] for a in annotations], dtype=np.float64).reshape(-1, 4)
+        bboxes = raw - np.array([1.0, 1.0, 0.0, 0.0])
+    return fnames, classes, bboxes
 
 
 class StanfordCars:
@@ -93,7 +102,7 @@ class StanfordCars:
         if not annotations.is_file():
             raise FileNotFoundError(f"Stanford Cars annotations not found: {annotations}; see planora_sf.cli.prepare_scars")
         self.image_dir = _image_dir(self.base, "cars_train" if train else "cars_test")
-        self.paths, self.targets = _read_annotations(annotations)
+        self.paths, self.targets, self.bboxes = _read_annotations(annotations)
         if check_files:
             missing = [p for p in self.paths if not (self.image_dir / p).is_file()]
             if missing:

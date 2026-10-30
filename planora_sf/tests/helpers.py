@@ -55,6 +55,9 @@ def make_fake_cub(root, num_classes: int = 6, train_per_class: int = 3, test_per
     (base / "images.txt").write_text("\n".join(images) + "\n")
     (base / "image_class_labels.txt").write_text("\n".join(labels) + "\n")
     (base / "train_test_split.txt").write_text("\n".join(flags) + "\n")
+    # x y width height, as in the official bounding_boxes.txt (float strings); box i starts at (i % 5, 2)
+    boxes = [f"{i} {i % 5}.0 2.0 {size // 2}.0 {size // 3}.0" for i, _, _ in rows]
+    (base / "bounding_boxes.txt").write_text("\n".join(boxes) + "\n")
     return rows
 
 
