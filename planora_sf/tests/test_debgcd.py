@@ -317,7 +317,7 @@ def test_dg08_guard_rejects_unanchored_known_classes(generator):
 
 def test_components_and_rows():
     cfg = PlanoraSFConfig.for_dataset("cub")
-    assert cfg.components() == {"fourex": True, "debgcd": False, "row": "E1"}
+    assert cfg.components() == {"fourex": True, "debgcd": False, "hypcd": False, "row": "E1"}
     assert cfg.set_components(fourex=False).components()["row"] == "E0"
     assert cfg.weights.cls == 0.0 and not cfg.cls_head.enabled
     assert cfg.set_components(debgcd=True).components()["row"] == "E2"
@@ -335,7 +335,7 @@ def test_train_cli_e2_then_rescore(tmp_path, capsys):
                      "--no-use-fourex", "--use_debgcd"])
     assert rc == 0
     summary = json.loads(capsys.readouterr().out)
-    assert summary["components"] == {"fourex": False, "debgcd": True, "row": "E2"}
+    assert summary["components"] == {"fourex": False, "debgcd": True, "hypcd": False, "row": "E2"}
     last = summary["history"][-1]["losses"]
     assert last["cls"] == 0.0 and {"sdl", "adl", "adl_utilisation"} <= set(last)
     assert set(summary["evaluations"][-1]) == {"epoch", "v1", "v2"}

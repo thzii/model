@@ -229,6 +229,13 @@ class HypCDConfig:
         if not 0.0 < self.project_eps < 1.0:
             raise ValueError("hypcd.project_eps must be in (0, 1)")
 
+    def alpha(self, epoch: int, total_epochs: int) -> float:
+        """α_d = α_max · clamp((epoch + δ) / E, 0, 1) for a 0-based epoch (paper: δ = 0; upstream
+        train_HypSelEx.py:361-364 with hyper_start 0, hyper_end E: δ = 1). E is the full schedule length."""
+        if total_epochs < 1 or epoch < 0:
+            raise ValueError(f"need epoch >= 0 and total_epochs >= 1, got {epoch}, {total_epochs}")
+        return self.alpha_max * min(max((epoch + self.alpha_epoch_offset) / total_epochs, 0.0), 1.0)
+
 
 @dataclass
 class OptimConfig:
@@ -330,7 +337,9 @@ class PlanoraSFConfig:
         cfg.selex.balanced = name not in UNBALANCED_DATASETS
         return cfg
 
-    def set_components(self, *, fourex: Optional[bool] = None, debgcd: Optional[bool] = None) -> "PlanoraSFConfig":
+    def set_components(
+        self, *, fourex: Optional[bool] = None, debgcd: Optional[bool] = None, hypcd: Optional[bool] = None
+    ) -> "PlanoraSFConfig":
         """Experiment-matrix toggles (plan §4.2); ``None`` leaves a component as configured.
 
         FourEx off = E0's definition: weights 0 and no L_cls head, keeping the 4-view
@@ -342,18 +351,24 @@ class PlanoraSFConfig:
             self.cls_head.enabled = fourex
         if debgcd is not None:
             self.debgcd.enabled = debgcd
+        if hypcd is not None:
+            self.hypcd.enabled = hypcd
         return self
 
     def components(self) -> dict[str, Any]:
-        """Which of SelEx + {FourEx, DebGCD} are active, plus the plan §4.2 row when it is a pure one."""
+        """Which of SelEx + {FourEx, DebGCD, HypCD} are active, plus the plan §4.2 row when it is a pure one.
+
+        HypCD combined with FourEx or DebGCD is a composed configuration with no row (plan D3).
+        """
         w = self.weights
         fourex_off = w.low == w.high == w.cls == 0.0 and not self.cls_head.enabled
         fourex_on = w.low == w.high == w.cls == 0.1 and self.cls_head.enabled
         row = None
-        # Rows with HypCD (E4) are named once its loss exists (plan Phases 1, 4).
-        if self.base == "selex" and not self.hypcd.enabled and (fourex_on or fourex_off):
+        if self.base == "selex" and self.hypcd.enabled:
+            row = "E4" if fourex_off and not self.debgcd.enabled else None
+        elif self.base == "selex" and (fourex_on or fourex_off):
             row = f"E{int(fourex_on) + 2 * int(self.debgcd.enabled)}"
-        return {"fourex": not fourex_off, "debgcd": self.debgcd.enabled, "row": row}
+        return {"fourex": not fourex_off, "debgcd": self.debgcd.enabled, "hypcd": self.hypcd.enabled, "row": row}
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)

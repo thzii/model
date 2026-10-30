@@ -110,4 +110,4 @@ def test_config_validation_and_defaults():
             HypCDConfig(**bad)
     cfg = PlanoraSFConfig.for_dataset("cub")
     cfg.hypcd.enabled = True
-    assert cfg.components()["row"] is None  # E4 is named once its loss exists (Phase 4)
+    assert cfg.components()["row"] is None  # HypCD with FourEx on is composed: no row (plan D3)

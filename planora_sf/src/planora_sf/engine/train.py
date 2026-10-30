@@ -100,14 +100,22 @@ def train_one_epoch(
     device: Union[str, torch.device] = "cpu",
     max_steps: Optional[int] = None,
     generator: Optional[torch.Generator] = None,
+    epoch: Optional[int] = None,
 ) -> tuple[int, dict[str, float]]:
-    """Phase B over one pass of ``loader``. Returns ``(steps, mean losses)``.
+    """Phase B over one pass of ``loader``. Returns ``(steps, mean losses and monitors)``.
+
+    HypCD needs the 0-based ``epoch`` for α_d (the schedule spans ``cfg.optim.epochs``).
 
     Training targets come from ``dataset.train_targets``, so unlabelled
     ground truth (which the dataset also yields for evaluation) is never used.
     """
     dataset: GCDTrainDataset = loader.dataset
     visible_targets = dataset.train_targets
+    hyp_alpha = None
+    if cfg.hypcd.enabled:
+        if epoch is None:
+            raise ValueError("HypCD needs the epoch index for its α_d schedule")
+        hyp_alpha = cfg.hypcd.alpha(epoch, cfg.optim.epochs)
     model.train()
     totals: dict[str, float] = defaultdict(float)
     steps = 0
@@ -120,7 +128,9 @@ def train_one_epoch(
             targets=visible_targets[index].to(device),
             labelled=is_labelled.to(device),
         )
-        losses, _ = compute_losses(model, fourier, batch, state.batch(index).to(device), cfg, generator=generator)
+        losses, _ = compute_losses(
+            model, fourier, batch, state.batch(index).to(device), cfg, generator=generator, hyp_alpha=hyp_alpha
+        )
         if not torch.isfinite(losses.total):
             raise FloatingPointError(f"non-finite loss at step {steps}: {losses.as_floats()}")
         optimizer.zero_grad(set_to_none=True)
@@ -191,7 +201,7 @@ def fit(
         lr = optimizer.param_groups[0]["lr"]
         steps, losses = train_one_epoch(  # phase B
             model, fourier, loader, state, optimizer, cfg,
-            device=device, max_steps=cfg.loop.max_steps_per_epoch, generator=generator,
+            device=device, max_steps=cfg.loop.max_steps_per_epoch, generator=generator, epoch=epoch,
         )
         scheduler.step()
         stats = EpochStats(epoch, steps, losses, lr, state.num_levels, time.perf_counter() - start)

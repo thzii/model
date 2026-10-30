@@ -12,6 +12,7 @@ Experiment rows (plan §4.2) on top of the chosen config:
     E1 SelEx+FourEx    --use-fourex            (the reference config already is E1)
     E2 SelEx+DebGCD    --no-use-fourex --use-debgcd
     E3 all three       --use-fourex --use-debgcd
+    E4 Hyp-SelEx       --no-use-fourex --use-hypcd
 Without a flag, a component stays as the config sets it.
 """
 from __future__ import annotations
@@ -53,7 +54,7 @@ def build_config(args: argparse.Namespace) -> PlanoraSFConfig:
         cfg.loop.max_steps_per_epoch = args.max_steps
     if args.num_workers is not None:
         cfg.loop.num_workers = args.num_workers
-    return cfg.set_components(fourex=args.use_fourex, debgcd=args.use_debgcd)
+    return cfg.set_components(fourex=args.use_fourex, debgcd=args.use_debgcd, hypcd=args.use_hypcd)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -74,6 +75,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         default=None, help="FourEx losses and L_cls head on/off (off = E0/E2)")
     parser.add_argument("--use-debgcd", "--use_debgcd", dest="use_debgcd", action=argparse.BooleanOptionalAction,
                         default=None, help="DebGCD detector + debiased classifier on/off (E2/E3)")
+    parser.add_argument("--use-hypcd", "--use_hypcd", dest="use_hypcd", action=argparse.BooleanOptionalAction,
+                        default=None, help="HypCD Poincaré-ball projection space on/off (E4)")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
