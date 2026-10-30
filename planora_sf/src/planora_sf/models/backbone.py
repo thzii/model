@@ -116,6 +116,62 @@ def strip_dino_checkpoint(state: Mapping[str, Any]) -> dict[str, torch.Tensor]:
     return out
 
 
+# Foreign checkpoints (official SelEx/SimGCD/DebGCD/HypCD code) wrap or prefix the ViT weights:
+# nn.Sequential(backbone, head) saves "0.blocks...", DDP adds "module.", DINO adds "backbone.".
+_FOREIGN_WRAPPERS = ("state_dict", "model", "teacher", "student", "backbone")
+_FOREIGN_PREFIXES = ("module.", "backbone.", "vit.", "0.")
+
+
+def _is_state_dict(obj: Any) -> bool:
+    return isinstance(obj, Mapping) and bool(obj) and all(isinstance(v, torch.Tensor) for v in obj.values())
+
+
+def foreign_backbone_state(obj: Any, target_keys: set[str]) -> tuple[dict[str, torch.Tensor], dict[str, Any]]:
+    """Map a foreign checkpoint onto the ViT's own key names (master plan Task #2a re-scoring).
+
+    Unwraps ``state_dict``/``model``/``teacher``/``student``/``backbone`` containers (or a pickled
+    module) and strips the prefixes above until a key matches ``target_keys``. Keys that never
+    match (heads, projectors) are ignored and counted. Returns ``(state, report)``.
+    """
+    if isinstance(obj, nn.Module):
+        obj = obj.state_dict()
+    while isinstance(obj, Mapping) and not _is_state_dict(obj):
+        inner = next((obj[k] for k in _FOREIGN_WRAPPERS if k in obj), None)
+        if inner is None:
+            raise ValueError(f"no state dict found in the checkpoint (top-level keys: {sorted(obj)[:10]})")
+        obj = inner.state_dict() if isinstance(inner, nn.Module) else inner
+    if not _is_state_dict(obj):
+        raise ValueError(f"expected a mapping of tensors, got {type(obj).__name__}")
+    state, ignored = {}, []
+    for key, value in obj.items():
+        name = key
+        while name not in target_keys:
+            prefix = next((p for p in _FOREIGN_PREFIXES if name.startswith(p)), None)
+            if prefix is None:
+                break
+            name = name[len(prefix):]
+        if name in target_keys:
+            if name in state:
+                raise ValueError(f"two checkpoint keys map to backbone key {name!r}")
+            state[name] = value
+        else:
+            ignored.append(key)
+    return state, {
+        "loaded": len(state), "num_ignored": len(ignored), "ignored_examples": sorted(ignored)[:10],
+        "missing": sorted(target_keys - set(state)),
+    }
+
+
+def load_foreign_backbone(vit: nn.Module, obj: Any) -> dict[str, Any]:
+    """Load foreign ViT weights into ``vit`` strictly: every backbone tensor must be present."""
+    state, report = foreign_backbone_state(obj, set(vit.state_dict()))
+    if report["missing"]:
+        raise ValueError(f"{len(report['missing'])} backbone tensors missing from the checkpoint, "
+                         f"e.g. {report['missing'][:5]}; ignored keys look like {report['ignored_examples'][:5]}")
+    vit.load_state_dict(state, strict=True)
+    return report
+
+
 def build_backbone(
     cfg: BackboneConfig,
     *,

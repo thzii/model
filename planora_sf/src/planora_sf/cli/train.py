@@ -31,8 +31,8 @@ from typing import Optional, Sequence
 
 import torch
 
-from planora_sf.cli.evaluate import json_safe
-from planora_sf.config import BackboneConfig, FourierConfig, HeadConfig, LatentConfig, PlanoraSFConfig
+from planora_sf.cli.common import json_safe, smoke_config
+from planora_sf.config import PlanoraSFConfig
 from planora_sf.data.factory import build_gcd_datasets, build_sources, build_split, canonical_dataset, default_root
 from planora_sf.engine.provenance import run_provenance
 from planora_sf.engine.train import fit
@@ -45,13 +45,7 @@ def build_config(args: argparse.Namespace) -> PlanoraSFConfig:
     elif args.dataset in ("cub", "scars"):
         cfg = PlanoraSFConfig.for_dataset(args.dataset)
     else:  # synthetic smoke run: tiny ViT, small latent space
-        cfg = PlanoraSFConfig(
-            backbone=BackboneConfig(name="tiny", grad_from_block=2, image_size=32),
-            head=HeadConfig(hidden_dim=64, bottleneck_dim=16),
-            latent=LatentConfig(dim=128),
-            fourier=FourierConfig(cutoff=6),
-        )
-        cfg.loop.num_workers = 0
+        cfg = smoke_config()
     if args.cutoff is not None:
         cfg.fourier.cutoff = args.cutoff
     if args.batch_size is not None:

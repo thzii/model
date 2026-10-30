@@ -212,7 +212,7 @@ def audit_checkpoint(path: Path, *, unsafe: bool = False) -> dict[str, Any]:
         report["provenance"] = {k: stored.get(k) for k in keys}  # all None before Task #2b checkpoints
         report["rescore"] = "cli.evaluate --checkpoint (native checkpoint)"
     else:
-        report["rescore"] = "not directly: foreign weights need a key mapping (master plan Task #1/2a)"
+        report["rescore"] = "cli.evaluate --foreign-backbone (key mapping of the ViT weights; heads are ignored)"
     report["dataset_votes"] = [{"dataset": d, "evidence": e} for d, e in votes]
     report["dataset"] = verdict(votes)
     return report

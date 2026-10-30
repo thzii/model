@@ -35,8 +35,9 @@ def test_evaluate_checkpoint_round_trip(checkpoint, capsys, tmp_path):
     args = ["--checkpoint", str(checkpoint), "--dataset", "dummy", "--device", "cpu", "--num-workers", "0",
             "--eval-seeds", "0,1"]
     first = _evaluate(capsys, *args, "--out", str(out_file))
-    assert set(first) == {"checkpoint", "dataset", "evaluator", "config", "config_diff_vs_cub_reference",
-                          "split", "per_seed", "summary"}
+    assert set(first) == {"checkpoint", "dataset", "backbone", "evaluator", "config", "config_diff_vs_cub_reference",
+                          "split", "split_sha256", "provenance", "split_matches_training", "code", "per_seed",
+                          "summary", "logged", "pseudo_labels"}
     assert first["checkpoint"]["epoch"] == 0 and first["checkpoint"]["frozen_backbone"] is False
     assert [r["seed"] for r in first["per_seed"]] == [0, 1]
     assert set(first["per_seed"][0]) == {"seed", "v1", "v2", "routing", "per_class_v2", "structure", "tiers"}
